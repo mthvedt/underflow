@@ -6,7 +6,7 @@
 
 (defprotocol State
   (push! [self f])
-  (^clojure.lang.IFn pop! [self])
+  (pop! [self])
   (save! [self f])
   (continue! [self]))
 
@@ -33,43 +33,47 @@
 
 (defn new-state [] (StateImpl. (atom '()) (atom nil) (atom nil)))
 
-(defn underflow [f arg]
-  (let [state (new-state)]
-    (loop [f f r arg]
-      (if f
-        (let [r (call f state r)]
-          (recur (pop! state) r))
-      r))))
+(defn do-underflow
+  [state r]
+  ;(prn state r)
+  (if-let [cfn (pop! state)]
+    (let [r (call cfn state r)]
+      (recur state r))
+    r))
 
-(defmacro =defn [sym arg & body]
+(defn underflow
+  [cfn arg]
+  (let [s (new-state)]
+    (push! s cfn)
+    (do-underflow s arg)))
+
+(defmacro =underflow [& body]
+  `(let [~'*state* (new-state)
+         result# (do ~@body)]
+     (do-underflow ~'*state* result#)))
+
+(defmacro =defn [sym [arg] & body]
   (let [=sym (symbol (str "=" sym))]
     `(do
+       (declare ~sym)
+       (defmacro ~=sym [arg#] `(call ~'~sym ~~''*state* ~arg#))
        (def ~sym
          (reify CFn
-           (call [_ ~'*state* ~@arg] ~@body)))
-       (defmacro ~=sym [arg#] `(call ~'~sym ~~''*state* ~arg#)))))
+           (call [_ ~'*state* ~arg] ~@body))))))
 
 (defmacro =tailrecur [f & body]
   `(do
      (push! ~'*state* ~f)
      ~@body))
 
-(defmacro =snap [body1-list [& args] body2-list]
-  "Snaps the continuation in body2 in a closure, binds it to *state*,
-  and executes body1. The bodies are lists that are spliced in."
-  `(let [~'*state* (fn [~@args] ~@body2-list)] ~@body1-list))
+(defmacro =fn [[arg] & body]
+  `(reify CFn
+     (call [_ ~'*state* ~arg] ~@body)))
 
-(defmacro =shift [cvar & body]
-  "Executes the given body binding the current continuation to cvar."
-  `(let [~cvar ~'*state*] ~@body))
-
-(defmacro =tailcall [f & args]
-  `(fn [] (~f ~'*state* ~@args)))
-
-(defmacro =tail-return [& values] `(fn [] (~'*state* ~@values)))
-
-(defmacro =fn [args & body]
-  `(fn ~(apply vector '*state* args) ~@body))
+(defmacro =snap [body1-list argv body2-list]
+  `(do
+     (push! ~'*state* (=fn ~argv ~@body2-list))
+     ~@body1-list))
 
 (defmacro =letone [[bindingf bindingv] & body]
   "Helper macro for =let. Use =let in preference to using this directly."
@@ -88,6 +92,14 @@
         `(=letone [~tvar ~tval]
                   (=let [~@(rest (rest bindings))] ~@body))))))
 
+(defmacro =shift [cvar & body]
+  "Executes the given body binding the current continuation to cvar."
+  `(let [~cvar ~'*state*] ~@body))
+
+(defmacro =tailcall [f & args]
+  `(fn [] (~f ~'*state* ~@args)))
+
+(defmacro =tail-return [& values] `(fn [] (~'*state* ~@values)))
        ; TODO
 #_(defmacro >continue [state cont rval]
   "Calls the given continuation with the given value.

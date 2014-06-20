@@ -6,14 +6,8 @@
 (deftest test-defs
          (is (= (underflow test1 1) 1)))
 
-(=defn consecutive-sum [x x2]
-       (if (= x 0)
-         x2 
-         (=tailrecur consecutive-sum (dec x) (+ x x2))))
-
 (declare funny-odd?)
 
-; TODO test vanilla calling
 (=defn funny-even? [x]
        (if (= x 0)
          true
@@ -25,20 +19,28 @@
          (=tailrecur funny-even? (dec x))))
 
 (deftest test-tailrecur
-  (is (= 55 (underflow consecutive-sum 10 0)))
-  (is (= 50005000 (underflow consecutive-sum 10000 0)))
   (is (underflow funny-even? 1000000))
   (is (not (underflow funny-even? 1000001)))
   (is (underflow funny-odd? 10000001))
   (is (not (underflow funny-odd? 100000))))
 
-#_(deftest test-let
-  (is (= 6 (underflow (=fn [] (=let [z (=return (+ 1 2))] (=return (+ z 3)))))))
-  (is (= 9 (underflow (=fn [] (=let [z (=return (+ 1 2)) z2 (=return (+ z 3))]
-                                 (=return (+ z z2)))))))
-  (is (= 9 (underflow (=fn [] (=let [z (=return (+ 1 2))]
-                                 (=let [z2 (=return (+ z 3))]
-                                       (=return (+ z z2)))))))))
+(=defn fib [x]
+       (case x
+         0 1
+         1 1
+         (=let [a (=fib (- x 1))
+                b (=fib (- x 2))]
+               (+ a b))))
+
+(deftest test-let
+  (is (= 6 (=underflow (=let [z (+ 1 2)] (+ z 3)))))
+  (is (= 9 (=underflow (=let [z (+ 1 2) z2 (+ z 3)]
+                             (+ z z2)))))
+  (is (= 9 (=underflow (=let [z (+ 1 2)]
+                             (=let [z2 (+ z 3)]
+                                   (+ z z2))))))
+  (is (= (underflow fib 5) 8))
+  (is (= (underflow fib 10) 89)))
 
 #_(
 (def mytree [[[1 2] 3] [[4 5] [6 7]]])
