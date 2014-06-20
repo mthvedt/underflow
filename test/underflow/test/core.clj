@@ -45,33 +45,25 @@
 (def mytree [[[1 2] 3] [[4 5] [6 7]]])
 
 (=defn dft2 [tree]
-  (cond (nil? tree) (=retry)
-        (and (coll? tree) (seq tree)) (=save (=dft2 (first tree)) (=dft2 (rest tree)))
-        (coll? tree) (=retry)
-        true tree))
-
-#_(let [x (doall (underflow-seq dft2 mytree))]
-  (prn x))
+       (if (coll? tree)
+         (if (seq tree)
+           (=save (=dft2 (first tree)) (=dft2 (rest tree)))
+           (=retry))
+         tree))
 
 (deftest test-dft-continuations
-         (is (= [1 2 3 4 5 6 7] (vec (underflow-seq dft2 mytree)))))
+         (is (= [1 2 3 4 5 6 7] (vec (underflow-seq (=dft2 mytree))))))
 
-#_(=defn dftx [tree1 tree2]
-  (=let [node1 (=dft-node tree1)]
-        (if (= ::done node1)
-          ::done
-          (=let [node2 (=dft-node tree2)]
-                (do (set! *rval* (conj *rval* [node1 node2]))
-                  (restart))))))
+; TODO a macro
+(defn dftx [tree1 tree2]
+  (vec
+    (underflow-seq
+      (=let [node1 (=dft2 tree1)
+             node2 (=dft2 tree2)]
+            [node1 node2]))))
 
-#_(defn >=dftx [tree1 tree2]
-  (binding [*tree-stack* []
-            *rval* []]
-    (underflow dftx tree1 tree2)
-    *rval*))
-
-#_(deftest test-more-dft-continuations
-         (is (= (>=dftx [[1 2] 3] [4 [5 6]])
-                [[1 4] [1 5] [1 6]
-                 [2 4] [2 5] [2 6]
-                 [3 4] [3 5] [3 6]])))
+(deftest test-more-dft-continuations
+  (is (= (dftx [[1 2] 3] [4 [5 6]])
+         [[1 4] [1 5] [1 6]
+          [2 4] [2 5] [2 6]
+          [3 4] [3 5] [3 6]])))
