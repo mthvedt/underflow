@@ -1,45 +1,46 @@
 (ns underflow.test.core
   (:use clojure.test underflow.core))
 
-(=defn test1 [x] (=return x))
+(=defn test1 [x] x)
 
 (deftest test-defs
-         (is (= (reset= test1 1) 1))
-         (is (= (with-local-vars [*cont* identity] (=test1 1) 1))))
+         (is (= (underflow test1 1) 1)))
 
 (=defn consecutive-sum [x x2]
        (if (= x 0)
-         (=return x2) 
-         (=tailcall consecutive-sum (dec x) (+ x x2))))
+         x2 
+         (=tailrecur consecutive-sum (dec x) (+ x x2))))
 
 (declare funny-odd?)
 
+; TODO test vanilla calling
 (=defn funny-even? [x]
        (if (= x 0)
-         (=return true)
-         (=tailcall funny-odd? (dec x))))
+         true
+         (=tailrecur funny-odd? (dec x))))
 
 (=defn funny-odd? [x]
        (if (= x 0)
-         (=return false)
-         (=tailcall funny-even? (dec x))))
+         false
+         (=tailrecur funny-even? (dec x))))
 
-(deftest test-tailcall
-         (is (= 55 (reset= consecutive-sum 10 0)))
-         (is (= 50005000 (reset= consecutive-sum 10000 0)))
-         (is (reset= funny-even? 1000000))
-         (is (not (reset= funny-even? 1000001)))
-         (is (reset= funny-odd? 10000001))
-         (is (not (reset= funny-odd? 100000))))
+(deftest test-tailrecur
+  (is (= 55 (underflow consecutive-sum 10 0)))
+  (is (= 50005000 (underflow consecutive-sum 10000 0)))
+  (is (underflow funny-even? 1000000))
+  (is (not (underflow funny-even? 1000001)))
+  (is (underflow funny-odd? 10000001))
+  (is (not (underflow funny-odd? 100000))))
 
-(deftest test-let
-  (is (= 6 (reset= (=fn [] (=let [z (=return (+ 1 2))] (=return (+ z 3)))))))
-  (is (= 9 (reset= (=fn [] (=let [z (=return (+ 1 2)) z2 (=return (+ z 3))]
+#_(deftest test-let
+  (is (= 6 (underflow (=fn [] (=let [z (=return (+ 1 2))] (=return (+ z 3)))))))
+  (is (= 9 (underflow (=fn [] (=let [z (=return (+ 1 2)) z2 (=return (+ z 3))]
                                  (=return (+ z z2)))))))
-  (is (= 9 (reset= (=fn [] (=let [z (=return (+ 1 2))]
+  (is (= 9 (underflow (=fn [] (=let [z (=return (+ 1 2))]
                                  (=let [z2 (=return (+ z 3))]
                                        (=return (+ z z2)))))))))
 
+#_(
 (def mytree [[[1 2] 3] [[4 5] [6 7]]])
 
 (def ^:dynamic *tree-stack*)
@@ -73,7 +74,7 @@
 (defn >=dft2 [tree]
   (binding [*tree-stack* []
             *rval* []]
-    (reset= dft2 tree)
+    (underflow dft2 tree)
     *rval*))
 
 (deftest test-dft-continuations
@@ -90,7 +91,7 @@
 (defn >=dftx [tree1 tree2]
   (binding [*tree-stack* []
             *rval* []]
-    (reset= dftx tree1 tree2)
+    (underflow dftx tree1 tree2)
     *rval*))
 
 (deftest test-more-dft-continuations
@@ -98,3 +99,4 @@
                 [[1 4] [1 5] [1 6]
                  [2 4] [2 5] [2 6]
                  [3 4] [3 5] [3 6]])))
+   )

@@ -1,37 +1,75 @@
-(ns underflow.core)
+(ns underflow.core
+  "Fast continuation-based nondeterministic fns.")
 
-; TODO split into blog post branch?
-(defmacro reset= [thefn & args]
-  "Sets a continuation context for the given fn, supplying identity as the first
-  continuation."
-  `(trampoline ~thefn identity ~@args))
+(defprotocol CFn
+  (call [f stack v]))
+
+(defprotocol State
+  (push! [self f])
+  (^clojure.lang.IFn pop! [self])
+  (save! [self f])
+  (continue! [self]))
+
+(deftype StateImpl [stack continuation continuation-stack]
+  State
+  ; A slow stack for now
+  (push! [_ cf]
+    ;(prn "Pushing" cf)
+    (swap! stack conj cf))
+  (pop! [_]
+    ;(prn "Popping" @stack)
+    (when-let [r (first @stack)] (swap! stack rest) r))
+  (save! [self closure]
+    (reset! continuation-stack [stack continuation continuation-stack])
+    (reset! continuation closure))
+  (continue! [self]
+    (if @continuation
+      (let [[s2 c2 cs2] @continuation-stack
+            c @continuation]
+        (reset! stack s2)
+        (reset! continuation c2)
+        (reset! continuation-stack cs2)
+        (c)))))
+
+(defn new-state [] (StateImpl. (atom '()) (atom nil) (atom nil)))
+
+(defn underflow [f arg]
+  (let [state (new-state)]
+    (loop [f f r arg]
+      (if f
+        (let [r (call f state r)]
+          (recur (pop! state) r))
+      r))))
+
+(defmacro =defn [sym arg & body]
+  (let [=sym (symbol (str "=" sym))]
+    `(do
+       (def ~sym
+         (reify CFn
+           (call [_ ~'*state* ~@arg] ~@body)))
+       (defmacro ~=sym [arg#] `(call ~'~sym ~~''*state* ~arg#)))))
+
+(defmacro =tailrecur [f & body]
+  `(do
+     (push! ~'*state* ~f)
+     ~@body))
 
 (defmacro =snap [body1-list [& args] body2-list]
-  "Snaps the continuation in body2 in a closure, binds it to *cont*,
+  "Snaps the continuation in body2 in a closure, binds it to *state*,
   and executes body1. The bodies are lists that are spliced in."
-  `(let [~'*cont* (fn [~@args] ~@body2-list)] ~@body1-list))
+  `(let [~'*state* (fn [~@args] ~@body2-list)] ~@body1-list))
 
 (defmacro =shift [cvar & body]
   "Executes the given body binding the current continuation to cvar."
-  `(let [~cvar ~'*cont*] ~@body))
+  `(let [~cvar ~'*state*] ~@body))
 
 (defmacro =tailcall [f & args]
-  `(fn [] (~f ~'*cont* ~@args)))
+  `(fn [] (~f ~'*state* ~@args)))
 
-(defmacro =defn [sym args & body]
-  "Defines an fn prepending *cont* to its list of arguments. Also defines
-  a = version that sets a continuation context."
-  (let [=sym (symbol (str "=" sym))]
-    `(do
-       (defmacro ~=sym [~'& args#] `(~'~sym ~~''*cont* ~@args#))
-       (defn ~sym [~'*cont* ~@args] ~@body))))
-
-(defmacro =return [& values] `(~'*cont* ~@values))
-
-(defmacro =tail-return [& values] `(fn [] (~'*cont* ~@values)))
+(defmacro =tail-return [& values] `(fn [] (~'*state* ~@values)))
 
 (defmacro =fn [args & body]
-  `(fn ~(apply vector '*cont* args) ~@body))
+  `(fn ~(apply vector '*state* args) ~@body))
 
 (defmacro =letone [[bindingf bindingv] & body]
   "Helper macro for =let. Use =let in preference to using this directly."
