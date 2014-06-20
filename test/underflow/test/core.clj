@@ -1,5 +1,5 @@
 (ns underflow.test.core
-  (:use clojure.test underflow.core))
+  (use clojure.test underflow.core))
 
 (=defn test1 [x] x)
 
@@ -50,6 +50,9 @@
            (=save (=dft2 (first tree)) (=dft2 (rest tree)))
            (=retry))
          tree))
+
+(deftest test-dft2
+  (is (= 1 (underflow dft2 mytree))))
 
 (deftest test-dft-continuations
          (is (= [1 2 3 4 5 6 7] (vec (underflow-seq (=dft2 mytree))))))
