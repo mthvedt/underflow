@@ -1,101 +1,104 @@
 (ns underflow.core
-  "Fast continuation-based nondeterministic fns."
-  (:refer-clojure))
+  "Fast continuation-based nondeterministic fns.")
 
 (defprotocol StateFn
-  (call [f stack v]))
+  (call [f state v]))
 
-; TODO generify, definterface, interface
-; Continuations should be immutable objects.
-; A framed computation is a fn + a stack. Framed computations are the
-; starting points. A framed computation must have save + restore.
-; TODO a frame should just be a protocol--it shouldn't have save and restore baked in.
-; TODO how to handle error?
-; TODO instead of continuation errors, could have a special 'end' framed computation.
-; each framed computation can return a lazy-seq? or maybe be an iterator?
+; TODO eliminate protocols
+; TODO save and restore impl? Need most efficient way...
 (defprotocol State
   ; First task is to make basic underflow only understand push/pop.
   ; The wrapping underflow-seq can deal with save and restore.
-  (push! [self f] "Push a continuation frame.")
-  (pop! [self] "Pop a continuation frame.")
-  #_(error [self] "Set the error flag.")
-  #_(error? [self] "Returns the error flag.")
-  #_(save! [self f] "Save a copy of the current continuation.")
-  #_(continue! [self]
-             "Unset the error flag and return to the previously saved continuation."))
+  (get-cont [self])
+  (set-cont [self c]))
+  ;(snap-state [self])
+  ;(unsnap-state [self state]))
 
-(defprotocol ContinuingState
+(defprotocol BacktrackingState
   (get-snapshot [self])
   (set-snapshot [self s])
-  ; TODO instead use 'copy'
-  (snapshot [self])
-  (restore [self snapshot]))
+  (snap-stack [self])
+  (unsnap-stack [self s]))
 
 (defprotocol Snapshot
   (restart! [self state]))
 
-; TODO first test this
-(deftype ContinuingStateImpl [continuation-stack snapshot]
+; TODO maybe we can wrap state?
+; BackTrackingStateImpl underlying-state snapshot-stack
+; Since we have to construct a new snapshot every time...
+; could make it a linked list...
+;
+; Does this apply to stacks? Should they be linked lists?
+; Probably? It's the simpler, general purposer solution.
+; It seems rare that a continuation won't capture its closed over environment.
+;
+; All snapshots are only run once. That's the rule.
+(deftype BacktrackingStateImpl [^:unsynchronized-mutable cont
+                                ^:unsynchronized-mutable snap]
   State
-  ; A slow stack for now
-  (push! [_ cf]
-    ;(prn "Pushing" cf)
-    (swap! continuation-stack conj cf))
-  (pop! [_]
-    ;(prn "Popping" @continuation-stack)
-    (when-let [r (first @continuation-stack)] (swap! continuation-stack rest) r))
-  ContinuingState
-  (set-snapshot [_ s]
-    (reset! snapshot s))
-  (get-snapshot [_] @snapshot)
-  ; TODO slow
-  (snapshot [_] [@continuation-stack @snapshot])
-  (restore [_ [cs s]]
-    (reset! continuation-stack cs)
-    (reset! snapshot s)))
+  (set-cont [_ c] (set! cont c))
+  (get-cont [_] cont)
+  BacktrackingState
+  ; TODO figure out api here.
+  (set-snapshot [_ s] (set! snap s))
+  (get-snapshot [_] snap)
+  (snap-stack [_] cont)
+  (unsnap-stack [_ c] (set! cont c)))
 
-(defn new-state [] (ContinuingStateImpl. (atom '()) (atom nil)))
+(defn new-state [] (BacktrackingStateImpl. nil nil))
 
 ; Core macros
-
-(defmacro =tailrecur
-  "Execute body without consuming stack.
-
-  This generally isn't neccesary except to save stack space."
-  [f & body]
-  `(do
-     (push! ~'*state* ~f)
-     ~@body))
 
 (defmacro =fn
   "Turn a fn of one argument into a state-passing fn."
   [[arg] & body]
   `(reify StateFn
-     (call [_ ~'*state* ~arg] ~@body)))
+     (call [~'_ ~'*state* ~arg] ~@body)))
+
+(defmacro =push
+  ; Warning: this is a 'side effect'!
+  [[arg] & body]
+  `(let [old-cont# (get-cont ~'*state*)]
+     (set-cont ~'*state*
+               (=fn [~arg]
+                    (set-cont ~'*state* old-cont#)
+                    ~@body))))
+
+(defmacro =tailcall
+  ;Execute body without consuming stack. Saves a stack frame
+  ;at the expense of constructing a closure + Underflow call overhead.
+  [& body]
+  `(do
+     (=push [~'_] ~@body)
+     nil))
 
 (defmacro =letone
-  "Lowest-level state-passing macro. Executes bindingv,
-  and pushes onto the stack a state-passing fn accepting bindingf and executing body.
-  Both bindingv and body are in tail-position."
   [[bindingf bindingv] & body]
   `(do
-     (push! ~'*state* (=fn [~bindingf] ~@body))
+     (=push [~bindingf] ~@body)
      ~bindingv))
 
-; Core macros for saving and restoring
-
-(defmacro =save [rval-body & closure-body]
-  `(let [state# (snapshot ~'*state*)
+; TODO amb iterable, amb vals
+(defmacro =save! [& body]
+  `(let [saved# (snap-stack ~'*state*)
+         old-snap# (get-snapshot ~'*state*)
          snap# (reify Snapshot
                  (restart! [self# ~'*state*]
+                   (set-snapshot ~'*state* old-snap#)
+                   (unsnap-stack ~'*state* saved#)
                    ;(prn "restarting saved" self#)
-                   (restore ~'*state* state#)
-                   ~@closure-body))]
-     (set-snapshot ~'*state* snap#)
-     ~rval-body))
+                   ~@body))]
+     (set-snapshot ~'*state* snap#)))
+
+(defmacro =amb
+  ; TODO does this have the correct tail semantics? does it matter?
+  ([closure-body] closure-body)
+  ([body & bodies]
+   `(do
+      (=save! (=amb ~@bodies))
+      ~body)))
 
 ; TODO retry that doesn't consume stack
-
 (defmacro =retry []
   ; TODO don't need to pass state twice
   `(when-let [s# (get-snapshot ~'*state*)]
@@ -117,17 +120,21 @@
         `(=letone [~tvar ~tval]
                   (=let [~@(rest (rest bindings))] ~@body))))))
 
-(defmacro =defn [sym [arg] & body]
+(defmacro =declare [sym]
   `(do
      (declare ~sym)
-     (defmacro ~(symbol (str "=" sym)) [arg#] `(call ~'~sym ~~''*state* ~arg#))
+     (defmacro ~(symbol (str "=" sym)) [arg#] `(call ~'~sym ~~''*state* ~arg#))))
+
+(defmacro =defn [sym [arg] & body]
+  `(do
+     (=declare ~sym)
      (def ~sym (=fn [~arg] ~@body))))
 
 ; Underflow
 
 (defn do-underflow
   [state start-value]
-  (if-let [sfn (pop! state)]
+  (if-let [sfn (get-cont state)]
     (let [r (call sfn state start-value)]
       (recur state r))
     start-value))
@@ -144,31 +151,38 @@
          result# (do ~@body)]
      (do-underflow ~'*state* result#)))
 
-(defn do-underflow-seq [snapshot]
-  (let [state (new-state)
-        ; TODO initial snapshot
-        ; TODO s/restart!/continue
-        ; TODO don't do the first computation until needed
-        ; TODO test empty seq
-        step (fn step [snapshot]
-               (lazy-seq
-                 (let [v (restart! snapshot state)
-                       ;_ (prn "restarting" v)
-                       v (do-underflow state v)]
-                       ;_ (prn "returned" v)]
-                   (when-let [c (get-snapshot state)]
-                     ;(prn "got snapshot" c)
-                     ; Only cons v if it's not the value from the terminal snapshot
-                     (cons v (step c))))))]
-    (step snapshot)))
+(deftype UnderflowIterator [^:unsynchronized-mutable nextv state]
+  java.util.Iterator
+  (hasNext [_]
+    ;(prn "Has next " (get-snapshot state))
+    (if (get-snapshot state) true false))
+  ; Needs to be called once by underflow-iterator, to set the first nextv
+  (next [_]
+    ;(prn "Nextv is " nextv " snapshot is " (get-snapshot state))
+    ; Make sure this nextv didn't come from the terminal snapshot
+    (if-let [snap (get-snapshot state)]
+      (let [r nextv]
+        (set! nextv (do-underflow state (restart! snap state)))
+        r)
+      (throw (java.util.NoSuchElementException.))))
+  (remove [_]
+    (throw (UnsupportedOperationException.))))
 
+(defn do-underflow-iterator [snapshot]
+  (let [state (new-state)
+        _ (set-snapshot state snapshot)
+        r (UnderflowIterator. nil state)]
+    (.next r)
+    r))
+
+; Used to gracefully terminate at the end of a computation, by returning nil.
 (def terminal-snapshot
   (reify Snapshot
     (restart! [self state]
       ;(prn "terminal snapshot" self)
       ; TODO this is impl dependent
-      (restore state [[] nil])
-      ;(set-snapshot state nil)
+      (set-snapshot state nil)
+      (unsnap-stack state nil)
       nil)))
 
 (defmacro initial-snapshot [& body]
@@ -178,5 +192,8 @@
        (set-snapshot ~'*state* terminal-snapshot)
        ~@body)))
 
+(defmacro underflow-iterator [& body]
+  `(do-underflow-iterator (initial-snapshot ~@body)))
+
 (defmacro underflow-seq [& body]
-  `(do-underflow-seq (initial-snapshot ~@body)))
+  `(iterator-seq (underflow-iterator ~@body)))

@@ -41,5 +41,11 @@
   (t/is (= (vec (crawl-tree test-tree)) (vec (underflow-seq (=dft2 test-tree)))))
   (t/is (= [1 2 3 4 5 6 7 8 9 10] (vec (underflow-seq (=dft2 test-tree))))))
 
-(defbench "Tree crawler" (dorun (crawl-tree test-tree)))
-(defbench "Underflow tree crawler" (dorun (underflow-seq (=dft2 test-tree))))
+(defn dorun-iterator [^java.util.Iterator i]
+  (while (.hasNext i)
+    (.next i)))
+
+(defbench "Tree crawler" (doall (crawl-tree test-tree)))
+(defbench "Underflow tree crawler" (doall (underflow-seq (=dft2 test-tree))))
+(defbench "Underflow tree crawler iterator"
+  (dorun-iterator (underflow-iterator (=dft2 test-tree))))
