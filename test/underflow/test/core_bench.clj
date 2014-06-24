@@ -49,3 +49,5 @@
 (defbench "Underflow tree crawler" (doall (underflow-seq (=dft2 test-tree))))
 (defbench "Underflow tree crawler iterator"
   (dorun-iterator (underflow-iterator (=dft2 test-tree))))
+(defbench "Fast underflow tree crawler iterator"
+  (dorun-iterator (underflow-iterator (=dft3 test-tree))))

@@ -1,5 +1,8 @@
 (ns underflow.core
   "Fast continuation-based nondeterministic fns.")
+; Safety beats speed.
+; Eliminate 'statefn'.
+; TODO maybe two ns, 'safe underflow' vs 'fast underflow'?
 
 (defprotocol StateFn
   (call [f state v]))
@@ -10,6 +13,7 @@
   ; First task is to make basic underflow only understand push/pop.
   ; The wrapping underflow-seq can deal with save and restore.
   (get-cont [self])
+  ; maybe push-cont returning a state?
   (set-cont [self c]))
   ;(snap-state [self])
   ;(unsnap-state [self state]))
@@ -24,13 +28,7 @@
   (restart! [self state]))
 
 ; TODO maybe we can wrap state?
-; BackTrackingStateImpl underlying-state snapshot-stack
-; Since we have to construct a new snapshot every time...
-; could make it a linked list...
-;
-; Does this apply to stacks? Should they be linked lists?
-; Probably? It's the simpler, general purposer solution.
-; It seems rare that a continuation won't capture its closed over environment.
+; TODO fast amb
 ;
 ; All snapshots are only run once. That's the rule.
 (deftype BacktrackingStateImpl [^:unsynchronized-mutable cont
@@ -78,34 +76,67 @@
      (=push [~bindingf] ~@body)
      ~bindingv))
 
-; TODO amb iterable, amb vals
-(defmacro =save! [& body]
-  `(let [saved# (snap-stack ~'*state*)
-         old-snap# (get-snapshot ~'*state*)
-         snap# (reify Snapshot
-                 (restart! [self# ~'*state*]
-                   (set-snapshot ~'*state* old-snap#)
-                   (unsnap-stack ~'*state* saved#)
-                   ;(prn "restarting saved" self#)
-                   ~@body))]
-     (set-snapshot ~'*state* snap#)))
+(defn save-helper [saved-stack-sym saved-snap-sym exprs]
+  (if-let [expr (first exprs)]
+    `(reify Snapshot
+       (restart! [self# ~'*state*]
+         (set-snapshot ~'*state*
+                       ~(save-helper saved-stack-sym saved-snap-sym (rest exprs)))
+         (unsnap-stack ~'*state* ~saved-stack-sym)
+         ~expr))
+    saved-snap-sym))
 
-(defmacro =amb
-  ; TODO does this have the correct tail semantics? does it matter?
-  ([closure-body] closure-body)
-  ([body & bodies]
-   `(do
-      (=save! (=amb ~@bodies))
-      ~body)))
+(defmacro =save-exprs! [& exprs]
+  (let [saved-sym (gensym "stack-snap")
+        snap-sym (gensym "snap")]
+    `(let [~saved-sym (snap-stack ~'*state*)
+           ~snap-sym (get-snapshot ~'*state*)
+           snap# ~(save-helper saved-sym snap-sym exprs)]
+       (set-snapshot ~'*state* snap#))))
+
+; TODO save-values!
+
+; Extended macros
+
+(defmacro =save! [& body]
+  `(=save-exprs! (do ~@body)))
 
 ; TODO retry that doesn't consume stack
 (defmacro =retry []
-  ; TODO don't need to pass state twice
+  ; TODO don't need to pass state twice?
   `(when-let [s# (get-snapshot ~'*state*)]
      ;(prn "retrying" s#)
      (restart! s# ~'*state*)))
 
-; Extended macros
+(defmacro =amb
+  ([] `(=retry))
+  ([body] body)
+  ([body & bodies]
+   `(do
+      (=save-exprs! ~@bodies)
+      ~body)))
+
+(defn iterator-snapshot [iterator old-stack old-snap]
+  (reify Snapshot
+    (restart! [self *state*]
+      (unsnap-stack *state* old-stack)
+      (let [next (.next iterator)]
+        (when-not (.hasNext iterator)
+          ; when i is exhausted, remove us from the stack
+          ; and restore the previous snapshot
+          (set-snapshot *state* old-snap))
+        next))))
+
+(defmacro =apply-amb [iterable]
+  `(let [saved# (snap-stack ~'*state*)
+         snap# (get-snapshot ~'*state*)
+         i# (.iterator (vary-meta ~iterable assoc :tag java.lang.Iterable))
+         newsnap# (iterator-snapshot i# saved# snap#)]
+     (if (.hasNext i#)
+       (do
+         (set-snapshot ~'*state* newsnap#)
+         (.next i#))
+       (=retry))))
 
 (defmacro =let [bindings & body]
   "Like let, but the binding vals may themselves be Underflow fns,
@@ -196,4 +227,5 @@
   `(do-underflow-iterator (initial-snapshot ~@body)))
 
 (defmacro underflow-seq [& body]
+  ; TODO check thread safety of this
   `(iterator-seq (underflow-iterator ~@body)))

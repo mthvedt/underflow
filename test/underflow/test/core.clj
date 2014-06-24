@@ -45,20 +45,31 @@
   (is (= (underflow fib 10) 89)))
 
 (def mytree [[[1 2] 3] [[4 5] [6 7]]])
+; TODO names
 (=defn dft2 [tree]
        (if (coll? tree)
          (if (seq tree)
-           (do
+           (do 
              (=save! (=dft2 (rest tree)))
              (=dft2 (first tree)))
            (=retry))
          tree))
 
+; TODO better name than apply amb
+; TODO move to tests
+(=defn dft3 [tree]
+  (if (coll? tree)
+    ; apply-amb must be in tail position
+    (=let [x (=apply-amb tree)]
+          (=dft3 x))
+    tree))
+
 (deftest test-dft2
   (is (= 1 (underflow dft2 mytree))))
 
 (deftest test-dft-continuations
-         (is (= [1 2 3 4 5 6 7] (vec (underflow-seq (=dft2 mytree))))))
+         (is (= [1 2 3 4 5 6 7] (vec (underflow-seq (=dft2 mytree)))))
+         (is (= [1 2 3 4 5 6 7] (vec (underflow-seq (=dft3 mytree))))))
 
 ; TODO a macro
 (defn dftx [tree1 tree2]
@@ -81,9 +92,22 @@
              node2 (=amb 4 5 6)]
             [node1 node2]))))
 
+(defn dft-apply-amb []
+  (vec
+    (underflow-seq
+      (=let [node1 (=apply-amb [1 2 3])
+             node2 (=apply-amb [4 5 6])]
+            [node1 node2]))))
+
 ; TODO rename
 (deftest test-amb
   (is (= (dftamb)
          [[1 4] [1 5] [1 6]
           [2 4] [2 5] [2 6]
-          [3 4] [3 5] [3 6]])))
+          [3 4] [3 5] [3 6]]))
+  (is (= (dft-apply-amb)
+         [[1 4] [1 5] [1 6]
+          [2 4] [2 5] [2 6]
+          [3 4] [3 5] [3 6]]))
+  (is (= (underflow-seq (=amb)) nil))
+  (is (= (underflow-seq (=apply-amb [])) nil)))

@@ -4,7 +4,8 @@
                             :jvm-opts ^:replace ["-XX:+PrintCompilation"
                                                  "-XX:+UnlockDiagnosticVMOptions"
                                                  "-XX:+PrintInlining"]}
-             :bench {:jvm-opts ^:replace []}}
+             :bench {:gloabl-vars {*warn-on-reflection* true}
+                     :jvm-opts ^:replace []}}
   :aliases {"bench-detail" ["with-profile" "bench-detail" "test"]
             "bench" ["with-profile" "bench" "test"]}
   :dependencies [[criterium "0.4.3" :scope "test"]
