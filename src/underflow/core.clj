@@ -1,20 +1,33 @@
 (ns underflow.core
-  "Fast continuation-based nondeterministic fns.")
-; Safety beats speed.
-; Eliminate 'statefn'.
-; TODO maybe two ns, 'safe underflow' vs 'fast underflow'?
+  "Fast continuation-based nondeterministic fns."
+  (import java.util.Iterator java.lang.Iterable))
+; TODO:
+; Prefer types with closures over macros.
 
-(defprotocol StateFn
-  (call [f state v]))
+; DESIGN DECISIONS
+; * Speed in Java comes from inlining and avoiding object construction.
+; Underflow should offer both as options whenever possible.
+; * Clojure is based on safety. Underflow should respect the safety/speed tradeoff.
+; * Use of Underflow should be as low effort as possible, except when it interferes
+; with the above two goals.
 
-; TODO eliminate protocols
-; TODO save and restore impl? Need most efficient way...
+; IMPLEMENTATION DETAILS
+; * It is assumed that callers will treat States monomorphically.
+; Each call to a state fn is assumed to be an inlinable static call.
+; This reduces the amount we need to worry about State performance.
+; * Most functionality is accomplished with macros reifying closures.
+; This is preferred over types containing closures, to avoid the 'double dispatch'
+; problem. Any underflow operations should require no more than one polymorphic
+; dispatch. In some places, we lean on the JVM's ability to infer static bindings,
+; and hence use types containing closures.
+
+; TODO the monad thing works after all. First work on the case w/o amb.
+
 (defprotocol State
-  ; First task is to make basic underflow only understand push/pop.
-  ; The wrapping underflow-seq can deal with save and restore.
   (get-cont [self])
-  ; maybe push-cont returning a state?
-  (set-cont [self c]))
+  (set-cont [self c])
+  (return [self other-state r])
+  (execute [self other-state start-value]))
   ;(snap-state [self])
   ;(unsnap-state [self state]))
 
@@ -27,54 +40,91 @@
 (defprotocol Snapshot
   (restart! [self state]))
 
-; TODO maybe we can wrap state?
-; TODO fast amb
-;
+; Marker type
+(defprotocol SafeStateRval
+  (safe-state-rval-execute [self]))
+; Separate deftype to ease debugging stack traces
+(deftype SafeStateRvalImpl [f s v]
+  SafeStateRval
+  (safe-state-rval-execute [self]
+    (f s v)))
+
+(deftype SafeState [cont]
+  State
+  (get-cont [_] cont)
+  (set-cont [_ c]
+    (SafeState. c))
+  (return [self other-state r]
+    (if-let [cont (get-cont self)]
+      (SafeStateRvalImpl. cont other-state r)
+      r))
+  (execute [self other-state v]
+    (if cont
+      (loop [v (cont other-state v)]
+        (if (instance? underflow.core.SafeStateRval v)
+          (recur (safe-state-rval-execute v))
+          v)))))
+
+(deftype MutableState [^:unsynchronized-mutable cont]
+  State
+  (get-cont [_] cont)
+  (set-cont [self c] (set! cont c) self)
+  (return [_ _ r] r)
+  (execute [self other-state v]
+    (if cont
+      (recur other-state (cont other-state v))
+      v)))
+
 ; All snapshots are only run once. That's the rule.
-(deftype BacktrackingStateImpl [^:unsynchronized-mutable cont
+; TODO snapshot cloning
+(deftype FastBacktrackingState [^:unsynchronized-mutable state
                                 ^:unsynchronized-mutable snap]
   State
-  (set-cont [_ c] (set! cont c))
-  (get-cont [_] cont)
+  (set-cont [self c] (set! state (set-cont state c)) self)
+  (get-cont [_] (get-cont state))
+  (return [_ other-state r] (return state other-state r))
+  (execute [self other-state v] (execute state other-state v))
   BacktrackingState
-  ; TODO figure out api here.
   (set-snapshot [_ s] (set! snap s))
   (get-snapshot [_] snap)
-  (snap-stack [_] cont)
-  (unsnap-stack [_ c] (set! cont c)))
+  (snap-stack [this] (get-cont this))
+  (unsnap-stack [this c] (set-cont this c)))
 
-(defn new-state [] (BacktrackingStateImpl. nil nil))
+;(defn new-state [] (FastBacktrackingState. (SafeState. nil) nil))
+;(defn new-state [] (FastBacktrackingState. (MutableState. nil) nil))
+;(defn new-state [sfn] (SafeState. sfn))
+(defn new-state [sfn] (MutableState. sfn))
 
 ; Core macros
 
 (defmacro =fn
   "Turn a fn of one argument into a state-passing fn."
   [[arg] & body]
-  `(reify StateFn
-     (call [~'_ ~'*state* ~arg] ~@body)))
+  `(fn [~'*state* ~arg] ~@body))
 
-(defmacro =push
-  ; Warning: this is a 'side effect'!
-  [[arg] & body]
-  `(let [old-cont# (get-cont ~'*state*)]
-     (set-cont ~'*state*
-               (=fn [~arg]
-                    (set-cont ~'*state* old-cont#)
-                    ~@body))))
-
-(defmacro =tailcall
-  ;Execute body without consuming stack. Saves a stack frame
-  ;at the expense of constructing a closure + Underflow call overhead.
+(defmacro =return
   [& body]
-  `(do
-     (=push [~'_] ~@body)
-     nil))
+  `(return ~'*state* ~'*state* (do ~@body)))
 
+(defmacro =bindone
+  [[bindingf bindingv] & body]
+  `(let [old-cont# (get-cont ~'*state*)
+         ~'*state* (set-cont ~'*state*
+                             (=fn [~bindingf]
+                                  (let [~'*state* (set-cont ~'*state* old-cont#)]
+                                    ~@body)))]
+     ~bindingv))
+
+  ; TODO not core macros
 (defmacro =letone
   [[bindingf bindingv] & body]
-  `(do
-     (=push [~bindingf] ~@body)
-     ~bindingv))
+  `(=bindone [~bindingf (=return ~bindingv)] ~@body))
+
+(defmacro =tailcall
+  [& body]
+  `(=letone [~'_ nil] ~@body))
+
+; TODO tailreturn
 
 (defn save-helper [saved-stack-sym saved-snap-sym exprs]
   (if-let [expr (first exprs)]
@@ -94,19 +144,20 @@
            snap# ~(save-helper saved-sym snap-sym exprs)]
        (set-snapshot ~'*state* snap#))))
 
-; TODO save-values!
-
-; Extended macros
-
-(defmacro =save! [& body]
-  `(=save-exprs! (do ~@body)))
-
 ; TODO retry that doesn't consume stack
 (defmacro =retry []
   ; TODO don't need to pass state twice?
   `(when-let [s# (get-snapshot ~'*state*)]
      ;(prn "retrying" s#)
      (restart! s# ~'*state*)))
+
+; TODO save-values!, ambv
+
+; Extended macros
+
+; TODO do we need this?
+(defmacro =save! [& body]
+  `(=save-exprs! (do ~@body)))
 
 (defmacro =amb
   ([] `(=retry))
@@ -116,7 +167,7 @@
       (=save-exprs! ~@bodies)
       ~body)))
 
-(defn iterator-snapshot [iterator old-stack old-snap]
+(defn iterator-snapshot [^Iterator iterator old-stack old-snap]
   (reify Snapshot
     (restart! [self *state*]
       (unsnap-stack *state* old-stack)
@@ -130,7 +181,7 @@
 (defmacro =apply-amb [iterable]
   `(let [saved# (snap-stack ~'*state*)
          snap# (get-snapshot ~'*state*)
-         i# (.iterator (vary-meta ~iterable assoc :tag java.lang.Iterable))
+         i# (.iterator ~(vary-meta iterable assoc :tag `Iterable))
          newsnap# (iterator-snapshot i# saved# snap#)]
      (if (.hasNext i#)
        (do
@@ -138,9 +189,20 @@
          (.next i#))
        (=retry))))
 
-(defmacro =let [bindings & body]
+(defmacro =bind [bindings & body]
   "Like let, but the binding vals may themselves be Underflow fns,
   and the continuation is saved as each binding executes."
+  (if (empty? bindings)
+    `(do ~@body)
+    (let [tvar (first bindings)
+          tval (second bindings)]
+      (if (nil? tval)
+        (throw (IllegalArgumentException.
+                 "=bind requires an even number of forms in binding vector"))
+        `(=bindone [~tvar ~tval]
+                   (=bind [~@(rest (rest bindings))] ~@body))))))
+
+(defmacro =let [bindings & body]
   (if (empty? bindings)
     `(do ~@body)
     (let [tvar (first bindings)
@@ -154,7 +216,7 @@
 (defmacro =declare [sym]
   `(do
      (declare ~sym)
-     (defmacro ~(symbol (str "=" sym)) [arg#] `(call ~'~sym ~~''*state* ~arg#))))
+     (defmacro ~(symbol (str "=" sym)) [arg#] `(~'~sym ~~''*state* ~arg#))))
 
 (defmacro =defn [sym [arg] & body]
   `(do
@@ -163,27 +225,20 @@
 
 ; Underflow
 
-(defn do-underflow
-  [state start-value]
-  (if-let [sfn (get-cont state)]
-    (let [r (call sfn state start-value)]
-      (recur state r))
-    start-value))
-
-(defn underflow
-  ; Calls underflow until state is exhausted
-  [sfn arg]
-  (let [s (new-state)
-        r (call sfn s arg)]
-    (do-underflow s r)))
+; TODO kind of hacky to get this to work with mutable state
+(defn underflow-identity [s x]
+  (set-cont s nil)
+  x)
 
 (defmacro =underflow [& body]
-  `(let [~'*state* (new-state)
-         result# (do ~@body)]
-     (do-underflow ~'*state* result#)))
+  `(let [sfn# (=fn [~'_]
+                   (let [~'*state* (set-cont ~'*state* underflow-identity)]
+                     ~@body))
+         state# (new-state sfn#)]
+     (execute state# state# nil)))
 
 (deftype UnderflowIterator [^:unsynchronized-mutable nextv state]
-  java.util.Iterator
+  Iterator
   (hasNext [_]
     ;(prn "Has next " (get-snapshot state))
     (if (get-snapshot state) true false))
@@ -193,7 +248,7 @@
     ; Make sure this nextv didn't come from the terminal snapshot
     (if-let [snap (get-snapshot state)]
       (let [r nextv]
-        (set! nextv (do-underflow state (restart! snap state)))
+        (set! nextv (execute state state (restart! snap state)))
         r)
       (throw (java.util.NoSuchElementException.))))
   (remove [_]
@@ -203,6 +258,7 @@
   (let [state (new-state)
         _ (set-snapshot state snapshot)
         r (UnderflowIterator. nil state)]
+    ; See above comments for UnderflowIterator
     (.next r)
     r))
 

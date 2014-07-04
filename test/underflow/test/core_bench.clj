@@ -1,6 +1,7 @@
 (ns underflow.test.core-bench
   (require [clojure.test :as t])
   (use underflow.core underflow.test.core criterium.core))
+; TODO don't make this a default test
 
 (defmacro defbench [thename microexpr]
   `(do
@@ -26,9 +27,9 @@
   (t/is (= (recursive-fib 15) (underflow fib 15)))
   (t/is (= (fast-fib 15) (underflow fib 15))))
 
-(defbench "Recursive fib" (recursive-fib 15))
-(defbench "Fast fib" (fast-fib 15))
-(defbench "Underflow fib" (underflow fib 15))
+;(defbench "Recursive fib" (recursive-fib 15))
+;(defbench "Fast fib" (fast-fib 15))
+;(defbench "Underflow fib" (underflow fib 15))
 
 (defn crawl-tree [tree]
   (if (coll? tree)
@@ -45,9 +46,9 @@
   (while (.hasNext i)
     (.next i)))
 
-(defbench "Tree crawler" (doall (crawl-tree test-tree)))
-(defbench "Underflow tree crawler" (doall (underflow-seq (=dft2 test-tree))))
-(defbench "Underflow tree crawler iterator"
-  (dorun-iterator (underflow-iterator (=dft2 test-tree))))
+;(defbench "Tree crawler" (doall (crawl-tree test-tree)))
+;(defbench "Underflow tree crawler" (doall (underflow-seq (=dft2 test-tree))))
+;(defbench "Underflow tree crawler iterator"
+;  (dorun-iterator (underflow-iterator (=dft2 test-tree))))
 (defbench "Fast underflow tree crawler iterator"
   (dorun-iterator (underflow-iterator (=dft3 test-tree))))

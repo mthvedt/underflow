@@ -2,48 +2,53 @@
   (use clojure.test underflow.core)
   (:refer-clojure :exclude [pop!]))
 
+; TODO test with stateful monad
+
 (=defn test1 [x] x)
 
 (deftest test-defs
-         (is (= (underflow test1 1) 1)))
+         (is (= (=underflow (=test1 1)) 1)))
 
 (=declare funny-odd?)
 
 (=defn funny-even? [x]
        (if (= x 0)
-         true
+         (=return true)
          (=tailcall (=funny-odd? (dec x)))))
 
-; TODO maybe tailcall can be simplified?
 (=defn funny-odd? [x]
        (if (= x 0)
-         false
+         (=return false)
          (=tailcall (=funny-even? (dec x)))))
 
 (deftest test-tailrecur
-  (is (underflow funny-even? 1000000))
-  (is (not (underflow funny-even? 1000001)))
-  (is (underflow funny-odd? 10000001))
-  (is (not (underflow funny-odd? 100000))))
+  (is (=underflow (=funny-even? 10)))
+  (is (not (=underflow (=funny-even? 11))))
+  (is (=underflow (=funny-odd? 11)))
+  (is (not (=underflow (=funny-odd? 10)))))
 
 (=defn fib [x]
        (case x
-         0 1
-         1 1
-         (=let [a (=fib (- x 1))
-                b (=fib (- x 2))]
-               (+ a b))))
+         0 (=return 1)
+         1 (=return 1)
+         (=bind [a (=fib (- x 1))
+                 b (=fib (- x 2))]
+                (=return (+ a b)))))
 
-(deftest test-let
-  (is (= 6 (=underflow (=let [z (+ 1 2)] (+ z 3)))))
+; TODO test failures. premature return shouldnt be allowed
+; (the below tests without return should fail)
+(deftest test-let-and-bind
+  (is (= 6 (=underflow (=let [z (+ 1 2)]
+                             (=return (+ z 3))))))
   (is (= 9 (=underflow (=let [z (+ 1 2) z2 (+ z 3)]
-                             (+ z z2)))))
+                             (=return (+ z z2))))))
   (is (= 9 (=underflow (=let [z (+ 1 2)]
                              (=let [z2 (+ z 3)]
-                                   (+ z z2))))))
-  (is (= (underflow fib 5) 8))
-  (is (= (underflow fib 10) 89)))
+                                   (=return (+ z z2)))))))
+  (is (= (=underflow (=fib 5)) 8))
+  (is (= (=underflow (=fib 10)) 89)))
 
+#_(
 (def mytree [[[1 2] 3] [[4 5] [6 7]]])
 ; TODO names
 (=defn dft2 [tree]
@@ -111,3 +116,4 @@
           [3 4] [3 5] [3 6]]))
   (is (= (underflow-seq (=amb)) nil))
   (is (= (underflow-seq (=apply-amb [])) nil)))
+   )
