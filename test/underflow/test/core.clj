@@ -2,9 +2,7 @@
   (use clojure.test underflow.core)
   (:refer-clojure :exclude [pop!]))
 
-; TODO test with stateful monad
-
-(=defn test1 [x] x)
+(=defn test1 [x] (=return x))
 
 (deftest test-defs
          (is (= (=underflow (=test1 1)) 1)))
@@ -40,7 +38,8 @@
 (deftest test-let-and-bind
   (is (= 6 (=underflow (=let [z (+ 1 2)]
                              (=return (+ z 3))))))
-  (is (= 9 (=underflow (=let [z (+ 1 2) z2 (+ z 3)]
+  (is (= 9 (=underflow (=let [z (+ 1 2)
+                              z2 (+ z 3)]
                              (=return (+ z z2))))))
   (is (= 9 (=underflow (=let [z (+ 1 2)]
                              (=let [z2 (+ z 3)]

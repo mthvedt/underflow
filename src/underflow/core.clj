@@ -49,21 +49,31 @@
   (safe-state-rval-execute [self]
     (f s v)))
 
-(deftype SafeState [cont]
+(defprotocol SafeBacktracker
+  (safe-backtracker-rval [self])
+  (next-state [self]))
+(deftype SafeBacktrackerImpl [r s]
+  SafeBacktracker
+  (safe-backtracker-rval [_] r)
+  (next-state [_] s))
+
+; TODO this is actually a generic stateful computation.
+(deftype SafeState [cont statev]
   State
   (get-cont [_] cont)
-  (set-cont [_ c]
-    (SafeState. c))
+  (set-cont [_ c] (SafeState. c statev))
   (return [self other-state r]
+    ; TODO underflow identity isn't doing its thing properly.
+    ; how to faster terminate execution?
     (if-let [cont (get-cont self)]
       (SafeStateRvalImpl. cont other-state r)
-      r))
+      (SafeBacktrackerImpl. r statev)))
   (execute [self other-state v]
     (if cont
       (loop [v (cont other-state v)]
         (if (instance? underflow.core.SafeStateRval v)
           (recur (safe-state-rval-execute v))
-          v)))))
+          (safe-backtracker-rval v))))))
 
 (deftype MutableState [^:unsynchronized-mutable cont]
   State
@@ -92,8 +102,8 @@
 
 ;(defn new-state [] (FastBacktrackingState. (SafeState. nil) nil))
 ;(defn new-state [] (FastBacktrackingState. (MutableState. nil) nil))
-;(defn new-state [sfn] (SafeState. sfn))
-(defn new-state [sfn] (MutableState. sfn))
+(defn new-state [sfn] (SafeState. sfn nil))
+;(defn new-state [sfn] (MutableState. sfn))
 
 ; Core macros
 
@@ -225,14 +235,9 @@
 
 ; Underflow
 
-; TODO kind of hacky to get this to work with mutable state
-(defn underflow-identity [s x]
-  (set-cont s nil)
-  x)
-
 (defmacro =underflow [& body]
   `(let [sfn# (=fn [~'_]
-                   (let [~'*state* (set-cont ~'*state* underflow-identity)]
+                   (let [~'*state* (set-cont ~'*state* nil)]
                      ~@body))
          state# (new-state sfn#)]
      (execute state# state# nil)))
