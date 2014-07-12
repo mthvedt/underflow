@@ -47,29 +47,26 @@
   (is (= (=underflow (=fib 5)) 8))
   (is (= (=underflow (=fib 10)) 89)))
 
-#_(
 (def mytree [[[1 2] 3] [[4 5] [6 7]]])
 ; TODO names
 (=defn dft2 [tree]
        (if (coll? tree)
          (if (seq tree)
-           (do 
-             (=save! (=dft2 (rest tree)))
-             (=dft2 (first tree)))
+           (=amb (=dft2 (first tree)) (=dft2 (rest tree)))
            (=retry))
-         tree))
+         (=return tree)))
 
 ; TODO better name than apply amb
 ; TODO move to tests
 (=defn dft3 [tree]
   (if (coll? tree)
     ; apply-amb must be in tail position
-    (=let [x (=apply-amb tree)]
-          (=dft3 x))
-    tree))
+    (=bind [x (=amb-iterate tree)]
+           (=dft3 x))
+    (=return tree)))
 
 (deftest test-dft2
-  (is (= 1 (underflow dft2 mytree))))
+  (is (= 1 (=underflow (=dft2 mytree)))))
 
 (deftest test-dft-continuations
          (is (= [1 2 3 4 5 6 7] (vec (underflow-seq (=dft2 mytree)))))
@@ -79,9 +76,9 @@
 (defn dftx [tree1 tree2]
   (vec
     (underflow-seq
-      (=let [node1 (=dft2 tree1)
-             node2 (=dft2 tree2)]
-            [node1 node2]))))
+      (=bind [node1 (=dft2 tree1)
+              node2 (=dft2 tree2)]
+            (=return [node1 node2])))))
 
 (deftest test-more-dft-continuations
   (is (= (dftx [[1 2] 3] [4 [5 6]])
@@ -92,16 +89,16 @@
 (defn dftamb []
   (vec
     (underflow-seq
-      (=let [node1 (=amb 1 2 3)
-             node2 (=amb 4 5 6)]
-            [node1 node2]))))
+      (=bind [node1 (=ambv 1 2 3)
+              node2 (=ambv 4 5 6)]
+            (=return [node1 node2])))))
 
-(defn dft-apply-amb []
+(defn dft-iterate []
   (vec
     (underflow-seq
-      (=let [node1 (=apply-amb [1 2 3])
-             node2 (=apply-amb [4 5 6])]
-            [node1 node2]))))
+      (=bind [node1 (=amb-iterate [1 2 3])
+              node2 (=amb-iterate [4 5 6])]
+            (=return [node1 node2])))))
 
 ; TODO rename
 (deftest test-amb
@@ -109,10 +106,10 @@
          [[1 4] [1 5] [1 6]
           [2 4] [2 5] [2 6]
           [3 4] [3 5] [3 6]]))
-  (is (= (dft-apply-amb)
+  (is (= (dft-iterate)
          [[1 4] [1 5] [1 6]
           [2 4] [2 5] [2 6]
           [3 4] [3 5] [3 6]]))
   (is (= (underflow-seq (=amb)) nil))
-  (is (= (underflow-seq (=apply-amb [])) nil)))
-   )
+  (is (= (underflow-seq (=ambv)) nil))
+  (is (= (underflow-seq (=amb-iterate [])) nil)))
