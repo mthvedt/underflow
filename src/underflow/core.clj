@@ -17,21 +17,21 @@
 ; This reduces the amount we need to worry about State performance.
 ; * Most functionality is accomplished with macros reifying closures.
 ; This is preferred over types containing closures, to avoid the 'double dispatch'
-; problem. Any underflow operations should require no more than one polymorphic
+; perf penalty. Any underflow operations should require no more than one polymorphic
 ; dispatch. In some places, we lean on the JVM's ability to infer static bindings,
 ; and hence use types containing closures.
 
 (defprotocol State
   (get-cont [self])
   (set-cont [self c])
-  (return [self other-state r])
-  (execute [self other-state snapfn]))
-  ;(snap-state [self])
-  ;(unsnap-state [self state]))
+  (return [self r])
+  (unreturn [self r])
+  (execute [self]))
 
 (defprotocol BacktrackingState
   (get-snapshot [self])
   (set-snapshot [self s])
+  (state-from [self r])
   (snap-stack [self])
   (unsnap-stack [self s]))
 
@@ -70,22 +70,28 @@
   (set-cont [_ c]
     (set! obsolete true)
     (SafeState. c statev nil))
-  (return [self other-state r]
-    ; TODO underflow identity isn't doing its thing properly.
-    ; how to faster terminate execution?
-    (if-let [cont (get-cont other-state)]
-      (SafeStateRvalImpl. cont other-state r)
+  (return [self r]
+    (if-let [cont (get-cont self)]
+      (SafeStateRvalImpl. cont self r)
       (SafeBacktrackerImpl. r statev)))
+  (unreturn [_ r]
+    (safe-backtracker-rval r))
   ; TODO peformance test this.
   ; The snapfn should be stack allocated in most circumstances.
-  (execute [self other-state snapfn]
+  (execute [self]
     ; A snapfn is basically a Haskell cont monad--it deposits a value
     ; into a continuation.
-    (loop [v (restart! snapfn other-state)]
+    (loop [v (restart! statev self)]
       (if (instance? underflow.core.SafeStateRval v)
         (recur (safe-state-rval-execute v))
         v)))
   BacktrackingState
+  (state-from [self r]
+    (if-let [next-snap (next-snap r)]
+      ; TODO shouldn't need get-state
+      ; TODO shouldn't need an if
+      (set-snapshot (get-state next-snap) next-snap)
+      (set-snapshot self nil)))
   (set-snapshot [_ s]
     (set! obsolete true)
     (SafeState. cont s nil))
@@ -98,37 +104,49 @@
   (unsnap-stack [self c]
     (set-cont self c)))
 
-(deftype MutableState [^:unsynchronized-mutable cont]
-  State
-  (get-cont [_] cont)
-  (set-cont [self c] (set! cont c) self)
-  (return [_ _ r] r)
-  (execute [self other-state snapfn]
-    ; TODO this might be broken
-    (loop [v (snapfn other-state)]
-      (if cont
-        (recur (cont other-state v))
-        v))))
-
 ; All snapshots are only run once. That's the rule.
 ; TODO snapshot cloning
-(deftype FastBacktrackingState [^:unsynchronized-mutable state
+(deftype FastBacktrackingState [^:unsynchronized-mutable cont
                                 ^:unsynchronized-mutable snap]
   State
-  (set-cont [self c] (set! state (set-cont state c)) self)
-  (get-cont [_] (get-cont state))
-  (return [_ other-state r] (return state other-state r))
-  (execute [self other-state v] (execute state other-state v))
+  (set-cont [self c] (set! cont c) self) 
+  (get-cont [_] cont)
+  (return [_ r] r)
+  (unreturn [_ r] r)
+  (execute [self]
+    (loop [v (restart! snap self)]
+      (if cont
+        (recur (cont self v))
+        v)))
   BacktrackingState
-  (set-snapshot [_ s] (set! snap s))
+  (state-from [self _] self)
+  (set-snapshot [self s] (set! snap s) self)
   (get-snapshot [_] snap)
   (snap-stack [self] (get-cont self))
   (unsnap-stack [self c] (set-cont self c)))
 
-;(defn new-state [] (FastBacktrackingState. (SafeState. nil) nil))
-;(defn new-state [] (FastBacktrackingState. (MutableState. nil) nil))
-(defn new-state [sfn] (SafeState. sfn nil nil))
-;(defn new-state [sfn] (MutableState. sfn))
+; TODO rearrange
+(deftype UnderflowIterator [^:unsynchronized-mutable state
+                            ^:unsynchronized-mutable nextv]
+  Iterator
+  (hasNext [_]
+    (if (get-snapshot state) true false))
+  ; Needs to be called once by underflow-iterator, to set the first nextv
+  (next [self]
+    ; Make sure this nextv didn't come from the terminal snapshot
+    (if (.hasNext self)
+      (let [r (execute state)
+            oldv nextv]
+        ; Get the next nextv (we're always one step ahead)
+        (set! state (state-from state r))
+        (set! nextv (unreturn state r))
+        oldv)
+      (throw (java.util.NoSuchElementException.))))
+  (remove [_]
+    (throw (UnsupportedOperationException.))))
+
+;(defn new-state [] (SafeState. nil nil nil))
+(defn new-state [] (FastBacktrackingState. nil nil))
 
 ; Core macros
 
@@ -139,7 +157,7 @@
 
 (defmacro =return
   [& body]
-  `(return ~'*state* ~'*state* (do ~@body)))
+  `(return ~'*state* (do ~@body)))
 
 (defmacro =bindone
   [[bindingf bindingv] & body]
@@ -191,11 +209,7 @@
      (restart! s# ~'*state*)
      (=return nil)))
 
-; TODO save-values!, ambv
-
 ; Extended macros
-
-; TODO =amb
 
 (defmacro =amb
   ([] `(=retry))
@@ -207,6 +221,7 @@
   [& bodies]
   `(=amb ~@(map (fn [x] `(=return ~x)) bodies)))
 
+; TODO there's mutability here
 (defn iterator-snapshot [^Iterator iterator old-state]
   (let [old-stack (snap-stack old-state)
         old-snap (get-snapshot old-state)]
@@ -264,31 +279,15 @@
 ; Underflow
 
 (defmacro =underflow [& body]
-  `(let [state# (new-state nil)
+  ; TODO should only require state monad
+  `(let [state# (new-state)
          sfn# (reify Snapshot
                 (get-state [~'_] state#)
                 (restart! [~'_ ~'*state*]
                   (let [~'*state* (set-cont ~'*state* nil)]
-                    ~@body)))]
-     (safe-backtracker-rval (execute state# state# sfn#))))
-
-; TODO this is type-specific
-(deftype UnderflowIterator [^:unsynchronized-mutable nextv]
-  Iterator
-  (hasNext [_]
-    (if (next-snap nextv) true false))
-  ; Needs to be called once by underflow-iterator, to set the first nextv
-  (next [self]
-    ; Make sure this nextv didn't come from the terminal snapshot
-    (if (.hasNext self)
-      (let [r nextv
-            next-snap (next-snap r)
-            state (set-snapshot (get-state next-snap) next-snap)]
-        (set! nextv (execute state state next-snap))
-        (safe-backtracker-rval r))
-      (throw (java.util.NoSuchElementException.))))
-  (remove [_]
-    (throw (UnsupportedOperationException.))))
+                    ~@body)))
+         state# (set-snapshot state# sfn#)]
+     (unreturn state# (execute state#))))
 
 ; Used to gracefully terminate at the end of a computation, by returning nil.
 (defn terminal-snapshot [state]
@@ -301,21 +300,26 @@
                       (unsnap-stack nil))]
         (=return nil)))))
 
-(defn do-underflow-iterator [snap]
-  (let [state (new-state nil)
-        state (set-snapshot state (terminal-snapshot state))]
-    (UnderflowIterator. (execute state state snap))))
+(defn do-underflow-iterator [state snap]
+  (let [state (set-snapshot state snap)
+        iterator (UnderflowIterator. state nil)]
+    ; Must get next and throw away the first value
+    (.next iterator)
+    iterator))
 
 ; TODO prefix with =
 ; TODO combine with underflow
 (defmacro underflow-iterator [& body]
-  `(let [sfn# (reify Snapshot
-                (get-state [~'_] nil)
+  `(let [state# (new-state)
+         sfn# (reify Snapshot
+                (get-state [~'_] state#)
                 (restart! [~'_ ~'*state*]
-                  (let [~'*state* (set-cont ~'*state* nil)]
+                  (let [~'*state* (set-snapshot ~'*state*
+                                                (terminal-snapshot ~'*state*))]
                     ~@body)))]
-     (do-underflow-iterator sfn#)))
+     (do-underflow-iterator state# sfn#)))
 
+; TODO =
 (defmacro underflow-seq [& body]
   ; TODO check thread safety of this
   `(iterator-seq (underflow-iterator ~@body)))

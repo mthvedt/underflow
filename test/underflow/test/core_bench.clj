@@ -24,8 +24,8 @@
              (unchecked-add x1 x2)))))
 
 (t/deftest fast-fib-check
-  (t/is (= (recursive-fib 15) (underflow fib 15)))
-  (t/is (= (fast-fib 15) (underflow fib 15))))
+  (t/is (= (recursive-fib 15) (=underflow (=fib 15))))
+  (t/is (= (fast-fib 15) (=underflow (=fib 15)))))
 
 ;(defbench "Recursive fib" (recursive-fib 15))
 ;(defbench "Fast fib" (fast-fib 15))
