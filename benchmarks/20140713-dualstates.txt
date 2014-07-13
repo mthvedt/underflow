@@ -1,0 +1,93 @@
+Performing task 'test' with profile(s): 'bench'
+Benchmarking:  Fast underflow tree crawler iterator
+Estimating sampling overhead
+Warming up for JIT optimisations 10000000000 ...
+  compilation occured before 100 iterations
+  compilation occured before 395356 iterations
+  compilation occured before 3162148 iterations
+  compilation occured before 3557404 iterations
+  compilation occured before 5138428 iterations
+  compilation occured before 5533684 iterations
+  compilation occured before 7509964 iterations
+  compilation occured before 9486244 iterations
+  compilation occured before 15810340 iterations
+  compilation occured before 19762900 iterations
+  compilation occured before 29249044 iterations
+  compilation occured before 50197612 iterations
+  compilation occured before 51383380 iterations
+  compilation occured before 98814100 iterations
+  compilation occured before 99604612 iterations
+  compilation occured before 100395124 iterations
+  compilation occured before 100790380 iterations
+  compilation occured before 101185636 iterations
+  compilation occured before 132806116 iterations
+  compilation occured before 134782396 iterations
+  compilation occured before 151778404 iterations
+  compilation occured before 152173660 iterations
+  compilation occured before 180236836 iterations
+  compilation occured before 262054828 iterations
+  compilation occured before 302370940 iterations
+  compilation occured before 403556476 iterations
+  compilation occured before 496836892 iterations
+  compilation occured before 504346756 iterations
+  compilation occured before 509089828 iterations
+  compilation occured before 958891156 iterations
+  compilation occured before 959286412 iterations
+  compilation occured before 1025294164 iterations
+  compilation occured before 1064819764 iterations
+  compilation occured before 1065610276 iterations
+  compilation occured before 1427664772 iterations
+  compilation occured before 1542289012 iterations
+  compilation occured before 1542684268 iterations
+  compilation occured before 1810272580 iterations
+  compilation occured before 1810667836 iterations
+  compilation occured before 1811458348 iterations
+  compilation occured before 2124501100 iterations
+  compilation occured before 2124896356 iterations
+  compilation occured before 2125291612 iterations
+  compilation occured before 2126082124 iterations
+  compilation occured before 2167188748 iterations
+  compilation occured before 2167979260 iterations
+  compilation occured before 2176279636 iterations
+  compilation occured before 2179441684 iterations
+  compilation occured before 2534776828 iterations
+  compilation occured before 2535172084 iterations
+Estimating execution count ...
+Sampling ...
+Final GC...
+Checking GC...
+WARNING: Final GC required 1.394107760751359 % of runtime
+Finding outliers ...
+Bootstrapping ...
+Checking outlier significance
+Warming up for JIT optimisations 10000000000 ...
+  compilation occured before 17242 iterations
+  compilation occured before 34483 iterations
+  compilation occured before 68965 iterations
+  compilation occured before 172411 iterations
+  compilation occured before 2017198 iterations
+Estimating execution count ...
+Sampling ...
+Final GC...
+Checking GC...
+Finding outliers ...
+Bootstrapping ...
+Checking outlier significance
+Evaluation count : 58373220 in 60 samples of 972887 calls.
+             Execution time mean : 1.020402 µs
+    Execution time std-deviation : 15.263149 ns
+   Execution time lower quantile : 1.008522 µs ( 2.5%)
+   Execution time upper quantile : 1.048166 µs (97.5%)
+                   Overhead used : 1.845695 ns
+
+Found 3 outliers in 60 samples (5.0000 %)
+	low-severe	 3 (5.0000 %)
+ Variance from outliers : 1.6389 % Variance is slightly inflated by outliers
+====
+
+lein test underflow.test.core
+
+lein test underflow.test.core-bench
+
+Ran 9 tests containing 23 assertions.
+0 failures, 0 errors.
