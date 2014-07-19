@@ -278,7 +278,7 @@
 
 ; Underflow
 
-(defmacro =underflow [& body]
+(defmacro underflow [& body]
   ; TODO should only require state monad
   `(let [state# (new-state)
          sfn# (reify Snapshot

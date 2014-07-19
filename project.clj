@@ -1,4 +1,4 @@
-(defproject underflow "0.1.0-SNAPSHOT"
+(defproject eightnotrump/underflow "0.1.0-SNAPSHOT"
   :description "Fast continuations that work."
   :profiles {:bench-detail {:gloabl-vars {*warn-on-reflection* true}
                             :jvm-opts ^:replace ["-XX:+PrintCompilation"
