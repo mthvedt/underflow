@@ -5,7 +5,7 @@
 (=defn test1 [x] (=return x))
 
 (deftest test-defs
-         (is (= (=underflow (=test1 1)) 1)))
+         (is (= (underflow (=test1 1)) 1)))
 
 (=declare funny-odd?)
 
@@ -20,10 +20,10 @@
          (=tailcall (=funny-even? (dec x)))))
 
 (deftest test-tailrecur
-  (is (=underflow (=funny-even? 10)))
-  (is (not (=underflow (=funny-even? 11))))
-  (is (=underflow (=funny-odd? 11)))
-  (is (not (=underflow (=funny-odd? 10)))))
+  (is (underflow (=funny-even? 10)))
+  (is (not (underflow (=funny-even? 11))))
+  (is (underflow (=funny-odd? 11)))
+  (is (not (underflow (=funny-odd? 10)))))
 
 (=defn fib [x]
        (case x
@@ -36,16 +36,16 @@
 ; TODO test failures. premature return shouldnt be allowed
 ; (the below tests without return should fail)
 (deftest test-let-and-bind
-  (is (= 6 (=underflow (=let [z (+ 1 2)]
+  (is (= 6 (underflow (=let [z (+ 1 2)]
                              (=return (+ z 3))))))
-  (is (= 9 (=underflow (=let [z (+ 1 2)
+  (is (= 9 (underflow (=let [z (+ 1 2)
                               z2 (+ z 3)]
                              (=return (+ z z2))))))
-  (is (= 9 (=underflow (=let [z (+ 1 2)]
+  (is (= 9 (underflow (=let [z (+ 1 2)]
                              (=let [z2 (+ z 3)]
                                    (=return (+ z z2)))))))
-  (is (= (=underflow (=fib 5)) 8))
-  (is (= (=underflow (=fib 10)) 89)))
+  (is (= (underflow (=fib 5)) 8))
+  (is (= (underflow (=fib 10)) 89)))
 
 (def mytree [[[1 2] 3] [[4 5] [6 7]]])
 ; TODO names
@@ -66,7 +66,7 @@
     (=return tree)))
 
 (deftest test-dft2
-  (is (= 1 (=underflow (=dft2 mytree)))))
+  (is (= 1 (underflow (=dft2 mytree)))))
 
 (deftest test-dft-continuations
          (is (= [1 2 3 4 5 6 7] (vec (underflow-seq (=dft2 mytree)))))

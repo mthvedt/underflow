@@ -31,13 +31,9 @@
 (defprotocol BacktrackingState
   (get-snapshot [self])
   (set-snapshot [self s])
-  (state-from [self r])
-  (snap-stack [self])
-  (unsnap-stack [self s]))
+  (state-from [self r]))
 
 (defprotocol Snapshot
-  ; TODO maybe this should assoc itself? is state the state or just a dict?
-  (get-state [self])
   (restart! [self state]))
 
 ; Marker type
@@ -87,22 +83,13 @@
         v)))
   BacktrackingState
   (state-from [self r]
-    (if-let [next-snap (next-snap r)]
-      ; TODO shouldn't need get-state
-      ; TODO shouldn't need an if
-      (set-snapshot (get-state next-snap) next-snap)
-      (set-snapshot self nil)))
+    (set-snapshot self (next-snap r)))
   (set-snapshot [_ s]
     (set! obsolete true)
     (SafeState. cont s nil))
   (get-snapshot [_]
     (check-obsolete obsolete)
-    statev)
-  (snap-stack [self]
-    (check-obsolete obsolete)
-    (get-cont self))
-  (unsnap-stack [self c]
-    (set-cont self c)))
+    statev))
 
 ; All snapshots are only run once. That's the rule.
 ; TODO snapshot cloning
@@ -121,9 +108,7 @@
   BacktrackingState
   (state-from [self _] self)
   (set-snapshot [self s] (set! snap s) self)
-  (get-snapshot [_] snap)
-  (snap-stack [self] (get-cont self))
-  (unsnap-stack [self c] (set-cont self c)))
+  (get-snapshot [_] snap))
 
 ; TODO rearrange
 (deftype UnderflowIterator [^:unsynchronized-mutable state
@@ -182,20 +167,19 @@
 (defn save-helper [saved-stack-sym saved-snap-sym exprs]
   (if-let [expr (first exprs)]
     `(reify Snapshot
-       (get-state [~'_] ~'*state*)
        (restart! [self# ~'*state*]
          (let [~'*state* (-> ~'*state*
                            (set-snapshot ~(save-helper
                                               saved-stack-sym saved-snap-sym
                                               (rest exprs)))
-                           (unsnap-stack ~saved-stack-sym))]
+                           (set-cont ~saved-stack-sym))]
            ~expr)))
     saved-snap-sym))
 
 (defmacro =save-exprs! [etbody & exprs]
   (let [saved-sym (gensym "stack-snap")
         snap-sym (gensym "snap")]
-    `(let [~saved-sym (snap-stack ~'*state*)
+    `(let [~saved-sym (get-cont ~'*state*)
            ~snap-sym (get-snapshot ~'*state*)
            snap# ~(save-helper saved-sym snap-sym exprs)
            ~'*state* (set-snapshot ~'*state* snap#)]
@@ -223,12 +207,11 @@
 
 ; TODO there's mutability here
 (defn iterator-snapshot [^Iterator iterator old-state]
-  (let [old-stack (snap-stack old-state)
+  (let [old-stack (get-cont old-state)
         old-snap (get-snapshot old-state)]
     (reify Snapshot
-      (get-state [_] old-state)
       (restart! [self *state*]
-        (let [*state* (unsnap-stack *state* old-stack)]
+        (let [*state* (set-cont *state* old-stack)]
           (if (.hasNext iterator)
             (=return (.next iterator))
             ; when iterator is exhausted, remove us from the stack
@@ -282,7 +265,6 @@
   ; TODO should only require state monad
   `(let [state# (new-state)
          sfn# (reify Snapshot
-                (get-state [~'_] state#)
                 (restart! [~'_ ~'*state*]
                   (let [~'*state* (set-cont ~'*state* nil)]
                     ~@body)))
@@ -293,11 +275,10 @@
 (defn terminal-snapshot [state]
   ; TODO shouldn't need to pass in state--minor slowdown
   (reify Snapshot
-    (get-state [self] state)
     (restart! [self *state*]
       (let [*state* (-> *state*
                       (set-snapshot nil)
-                      (unsnap-stack nil))]
+                      (set-cont nil))]
         (=return nil)))))
 
 (defn do-underflow-iterator [state snap]
@@ -312,7 +293,6 @@
 (defmacro underflow-iterator [& body]
   `(let [state# (new-state)
          sfn# (reify Snapshot
-                (get-state [~'_] state#)
                 (restart! [~'_ ~'*state*]
                   (let [~'*state* (set-snapshot ~'*state*
                                                 (terminal-snapshot ~'*state*))]
