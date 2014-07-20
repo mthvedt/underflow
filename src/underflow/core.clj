@@ -128,8 +128,8 @@
   (remove [_]
     (throw (UnsupportedOperationException.))))
 
-;(defn new-state [] (SafeState. nil nil nil))
-(defn new-state [] (FastBacktrackingState. nil nil))
+(defn safe-harness [] (SafeState. nil nil nil))
+(defn fast-harness [] (FastBacktrackingState. nil nil))
 
 ; Core macros
 
@@ -260,11 +260,8 @@
 ; Underflow
 
 (defmacro underflow
-  ; TODO
-  [& body]
-  ;[state & body]
-  ;`(let [~'*state* ~state
-  `(let [~'*state* (new-state)
+  [state & body]
+  `(let [~'*state* ~state
          rval# (do ~@body)]
      (unreturn ~'*state* (execute ~'*state* rval#))))
 
@@ -284,14 +281,13 @@
     (.next iterator)
     iterator))
 
-(defmacro underflow-iterator [& body]
-  `(let [state# (new-state)
-         sfn# (reify Snapshot
+(defmacro underflow-iterator [state & body]
+  `(let [sfn# (reify Snapshot
                 (restart! [~'_ ~'*state*]
                   (let [~'*state* (set-minstance ~'*state* terminal-snapshot)]
                     ~@body)))]
-     (do-underflow-iterator state# sfn#)))
+     (do-underflow-iterator ~state sfn#)))
 
-(defmacro underflow-seq [& body]
+(defmacro underflow-seq [state & body]
   ; TODO check thread safety of this
-  `(iterator-seq (underflow-iterator ~@body)))
+  `(iterator-seq (underflow-iterator ~state ~@body)))

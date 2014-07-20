@@ -1,11 +1,15 @@
 (ns underflow.test.core
-  (use clojure.test underflow.core)
-  (:refer-clojure :exclude [pop!]))
+  (use clojure.test underflow.core))
 
-(=defn test1 [x] (=return x))
+(defmacro test-underflow [expected & body]
+  `(let [expected# ~expected
+         testf# (fn [state#] (underflow state# ~@body))]
+     (is (= expected# (testf# (safe-harness))))
+     (is (= expected# (testf# (fast-harness))))))
 
-(deftest test-defs
-         (is (= (underflow (=test1 1)) 1)))
+(=defn basic-testf [x] (=return x))
+
+(deftest basic-test (test-underflow 1 (=basic-testf 1)))
 
 (=declare funny-odd?)
 
@@ -20,10 +24,10 @@
          (=tailcall (=funny-even? (dec x)))))
 
 (deftest test-tailrecur
-  (is (underflow (=funny-even? 10)))
-  (is (not (underflow (=funny-even? 11))))
-  (is (underflow (=funny-odd? 11)))
-  (is (not (underflow (=funny-odd? 10)))))
+  (test-underflow true (=funny-even? 10))
+  (test-underflow false (=funny-even? 11))
+  (test-underflow false (=funny-odd? 10))
+  (test-underflow true (=funny-odd? 11)))
 
 (=defn fib [x]
        (case x
@@ -34,18 +38,18 @@
                 (=return (+ a b)))))
 
 ; TODO test failures. premature return shouldnt be allowed
-; (the below tests without return should fail)
+; (the below tests without return should fail in safe mode)
 (deftest test-let-and-bind
-  (is (= 6 (underflow (=let [z (+ 1 2)]
-                             (=return (+ z 3))))))
-  (is (= 9 (underflow (=let [z (+ 1 2)
-                              z2 (+ z 3)]
-                             (=return (+ z z2))))))
-  (is (= 9 (underflow (=let [z (+ 1 2)]
-                             (=let [z2 (+ z 3)]
-                                   (=return (+ z z2)))))))
-  (is (= (underflow (=fib 5)) 8))
-  (is (= (underflow (=fib 10)) 89)))
+  (test-underflow 6 (=let [z (+ 1 2)]
+                          (=return (+ z 3))))
+  (test-underflow 9 (=let [z (+ 1 2)
+                           z2 (+ z 3)]
+                          (=return (+ z z2))))
+  (test-underflow 9 (=let [z (+ 1 2)]
+                          (=let [z2 (+ z 3)]
+                                (=return (+ z z2)))))
+  (test-underflow 8 (=fib 5))
+  (test-underflow 89 (=fib 10)))
 
 (def mytree [[[1 2] 3] [[4 5] [6 7]]])
 ; TODO names
@@ -56,26 +60,22 @@
            (=retry))
          (=return tree)))
 
-; TODO better name than apply amb
-; TODO move to tests
 (=defn dft3 [tree]
   (if (coll? tree)
-    ; apply-amb must be in tail position
     (=bind [x (=amb-iterate tree)]
            (=dft3 x))
     (=return tree)))
 
 (deftest test-dft2
-  (is (= 1 (underflow (=dft2 mytree)))))
+  (test-underflow 1 (=dft2 mytree)))
 
 (deftest test-dft-continuations
-         (is (= [1 2 3 4 5 6 7] (vec (underflow-seq (=dft2 mytree)))))
-         (is (= [1 2 3 4 5 6 7] (vec (underflow-seq (=dft3 mytree))))))
+         (is (= [1 2 3 4 5 6 7] (vec (underflow-seq (fast-harness) (=dft2 mytree)))))
+         (is (= [1 2 3 4 5 6 7] (vec (underflow-seq (fast-harness) (=dft3 mytree))))))
 
-; TODO a macro
 (defn dftx [tree1 tree2]
   (vec
-    (underflow-seq
+    (underflow-seq (fast-harness)
       (=bind [node1 (=dft2 tree1)
               node2 (=dft2 tree2)]
             (=return [node1 node2])))))
@@ -88,14 +88,15 @@
 
 (defn dftamb []
   (vec
-    (underflow-seq
+    (underflow-seq (fast-harness)
       (=bind [node1 (=ambv 1 2 3)
               node2 (=ambv 4 5 6)]
             (=return [node1 node2])))))
 
+; TODO test safe-harness
 (defn dft-iterate []
   (vec
-    (underflow-seq
+    (underflow-seq (fast-harness)
       (=bind [node1 (=amb-iterate [1 2 3])
               node2 (=amb-iterate [4 5 6])]
             (=return [node1 node2])))))
@@ -110,6 +111,6 @@
          [[1 4] [1 5] [1 6]
           [2 4] [2 5] [2 6]
           [3 4] [3 5] [3 6]]))
-  (is (= (underflow-seq (=amb)) nil))
-  (is (= (underflow-seq (=ambv)) nil))
-  (is (= (underflow-seq (=amb-iterate [])) nil)))
+  (is (= (underflow-seq (fast-harness) (=amb)) nil))
+  (is (= (underflow-seq (fast-harness) (=ambv)) nil))
+  (is (= (underflow-seq (fast-harness) (=amb-iterate [])) nil)))
