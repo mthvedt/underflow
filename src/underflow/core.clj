@@ -1,6 +1,8 @@
 (ns underflow.core
   "Fast continuation-based nondeterministic fns."
   (import java.util.Iterator java.lang.Iterable))
+; TODO multi-valued underflow?
+; =return multivalue can push a new cont that wraps/unwraps
 
 ; DESIGN DECISIONS
 ; * Speed in Java comes from inlining and avoiding object construction.

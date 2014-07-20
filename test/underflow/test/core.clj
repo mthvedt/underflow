@@ -3,7 +3,7 @@
 
 (defmacro test-underflow [expected & body]
   `(let [expected# ~expected
-         testf# (fn [state#] (underflow state# ~@body))]
+         testf# (fn [harness#] (underflow harness# ~@body))]
      (is (= expected# (testf# (safe-harness))))
      (is (= expected# (testf# (fast-harness))))))
 
@@ -51,66 +51,73 @@
   (test-underflow 8 (=fib 5))
   (test-underflow 89 (=fib 10)))
 
+(defmacro test-amb [expected & body]
+  `(let [expected# ~expected
+         testf# (fn [harness#] (vec (underflow-seq harness# ~@body)))]
+     (is (= ~expected (testf# (safe-harness))))
+     (is (= ~expected (testf# (fast-harness))))))
+
 (def mytree [[[1 2] 3] [[4 5] [6 7]]])
-; TODO names
-(=defn dft2 [tree]
+
+(=defn amb-crawl [tree]
        (if (coll? tree)
          (if (seq tree)
-           (=amb (=dft2 (first tree)) (=dft2 (rest tree)))
+           (=amb (=amb-crawl (first tree)) (=amb-crawl (rest tree)))
            (=retry))
          (=return tree)))
 
-(=defn dft3 [tree]
+(=defn iterate-crawl [tree]
   (if (coll? tree)
     (=bind [x (=amb-iterate tree)]
-           (=dft3 x))
+           (=iterate-crawl x))
     (=return tree)))
 
-(deftest test-dft2
-  (test-underflow 1 (=dft2 mytree)))
+(deftest test-amb-crawl
+  (test-underflow 1 (=amb-crawl mytree)))
 
 (deftest test-dft-continuations
-         (is (= [1 2 3 4 5 6 7] (vec (underflow-seq (fast-harness) (=dft2 mytree)))))
-         (is (= [1 2 3 4 5 6 7] (vec (underflow-seq (fast-harness) (=dft3 mytree))))))
+         (test-amb [1 2 3 4 5 6 7] (=amb-crawl mytree))
+         (test-amb [1 2 3 4 5 6 7] (=iterate-crawl mytree)))
 
-(defn dftx [tree1 tree2]
-  (vec
-    (underflow-seq (fast-harness)
-      (=bind [node1 (=dft2 tree1)
-              node2 (=dft2 tree2)]
-            (=return [node1 node2])))))
+(=defn multi-crawl-1 [_]
+       (=bind [node1 (=amb-crawl [1 [2 3]])
+               node2 (=amb-crawl [[4 5] 6])]
+              (=return [node1 node2])))
+
+(=defn multi-crawl-2 [_]
+       (=bind [node1 (=amb-crawl [1 2 3])
+               node2 (=amb-crawl [4 5 6])]
+              (=return [node1 node2])))
 
 (deftest test-more-dft-continuations
-  (is (= (dftx [[1 2] 3] [4 [5 6]])
-         [[1 4] [1 5] [1 6]
-          [2 4] [2 5] [2 6]
-          [3 4] [3 5] [3 6]])))
+  (test-amb [[1 4] [1 5] [1 6]
+             [2 4] [2 5] [2 6]
+             [3 4] [3 5] [3 6]]
+            (=multi-crawl-1 nil))
+  (test-amb [[1 4] [1 5] [1 6]
+             [2 4] [2 5] [2 6]
+             [3 4] [3 5] [3 6]]
+            (=multi-crawl-2 nil)))
 
-(defn dftamb []
-  (vec
-    (underflow-seq (fast-harness)
-      (=bind [node1 (=ambv 1 2 3)
-              node2 (=ambv 4 5 6)]
-            (=return [node1 node2])))))
+(=defn crawl-test [_]
+       (=bind [node1 (=ambv 1 2 3)
+               node2 (=ambv 4 5 6)]
+              (=return [node1 node2])))
 
-; TODO test safe-harness
-(defn dft-iterate []
-  (vec
-    (underflow-seq (fast-harness)
-      (=bind [node1 (=amb-iterate [1 2 3])
-              node2 (=amb-iterate [4 5 6])]
-            (=return [node1 node2])))))
+(=defn iterate-crawl-test [_]
+       (=bind [node1 (=amb-iterate [1 2 3])
+               node2 (=amb-iterate [4 5 6])]
+              (=return [node1 node2])))
 
-; TODO rename
 (deftest test-amb
-  (is (= (dftamb)
-         [[1 4] [1 5] [1 6]
+  (test-amb [[1 4] [1 5] [1 6]
+             [2 4] [2 5] [2 6]
+             [3 4] [3 5] [3 6]]
+    (=crawl-test nil))
+  (test-amb [[1 4] [1 5] [1 6]
           [2 4] [2 5] [2 6]
-          [3 4] [3 5] [3 6]]))
-  (is (= (dft-iterate)
-         [[1 4] [1 5] [1 6]
-          [2 4] [2 5] [2 6]
-          [3 4] [3 5] [3 6]]))
-  (is (= (underflow-seq (fast-harness) (=amb)) nil))
-  (is (= (underflow-seq (fast-harness) (=ambv)) nil))
-  (is (= (underflow-seq (fast-harness) (=amb-iterate [])) nil)))
+          [3 4] [3 5] [3 6]]
+    (=iterate-crawl-test nil))
+  (test-amb [] (=amb))
+  (test-amb [] (=ambv))
+  (test-amb [] (=amb-iterate [])))
