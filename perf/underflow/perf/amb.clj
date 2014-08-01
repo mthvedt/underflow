@@ -1,7 +1,6 @@
-(ns underflow.test.core-bench
+(ns underflow.perf.amb
   (require [clojure.test :as t])
-  (use underflow.core underflow.test.core criterium.core))
-; TODO don't make this a default test
+  (use underflow.core underflow.amb underflow.test.core criterium.core))
 
 (defmacro defbench [thename microexpr]
   `(do
@@ -39,8 +38,12 @@
 (def test-tree [[[[1 2] 3] [4 5]] [6 [[7 8] [9 10]]]])
 
 (t/deftest test-tree-check
-  (t/is (= (vec (crawl-tree test-tree)) (vec (underflow-seq (fast-harness)
-                                                            (=amb-crawl test-tree)))))
+  (t/is (= (vec (crawl-tree test-tree))
+           (vec (underflow-seq (fast-harness) (=amb-crawl test-tree)))))
+  (t/is (= (vec (crawl-tree test-tree))
+           (vec (underflow-seq (fast-harness) (=iterate-crawl test-tree)))))
+  (t/is (= (vec (crawl-tree test-tree))
+           (vec (underflow-seq (fast-harness) (=iterate-crawl-2 test-tree)))))
   (t/is (= [1 2 3 4 5 6 7 8 9 10] (vec (underflow-seq (fast-harness)
                                                       (=amb-crawl test-tree))))))
 
@@ -53,5 +56,8 @@
                                                          (=amb-crawl test-tree))))
 (defbench "Underflow tree crawler iterator"
   (dorun-iterator (underflow-iterator (fast-harness) (=amb-crawl test-tree))))
+; TODO maybe bench with = not =>
 (defbench "Fast underflow tree crawler iterator"
   (dorun-iterator (underflow-iterator (fast-harness) (=iterate-crawl test-tree))))
+(defbench "Fast underflow tree crawler iterator, with =>return"
+  (dorun-iterator (underflow-iterator (fast-harness) (=iterate-crawl-2 test-tree))))

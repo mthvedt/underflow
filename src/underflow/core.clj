@@ -1,8 +1,4 @@
-(ns underflow.core
-  "Fast continuation-based nondeterministic fns."
-  (import java.util.Iterator java.lang.Iterable))
-; TODO multi-valued underflow?
-; =return multivalue can push a new cont that wraps/unwraps
+(ns underflow.core)
 
 ; DESIGN DECISIONS
 ; * Speed in Java comes from inlining and avoiding object construction.
@@ -12,9 +8,8 @@
 ; with the above two goals.
 
 ; IMPLEMENTATION DETAILS
-; * It is assumed that callers will treat States monomorphically.
-; Each call to a state fn is assumed to be an inlinable static call.
-; This reduces the amount we need to worry about State performance.
+; * Calls to the Harness are small monomorphic (or at worst dimorphic) calls,
+; for maximum inlinability.
 ; * Most functionality is accomplished with macros reifying closures.
 ; This is preferred over types containing closures, to avoid the 'double dispatch'
 ; perf penalty. Any underflow operations should require no more than one polymorphic
@@ -24,39 +19,39 @@
 (defprotocol Harness
   "A harness for monadic execution. You can choose between fast or safe
   harnesses. We recommend you do not manipulate harnesses directly."
+  ; Harness fns are assumed to be highly inlinable.
+
   ; Gets and sets the local value for the continuation,
   ; which is the (a -> mb) value in do-notation binds.
   (get-cont [self])
   (set-cont [self c])
   ; Boxes and unboxes return values. In the fast version, these are noops.
   (return [self r])
-  (unreturn [self r])
+  (fast-return [self r])
+  (extract [self r])
+  ; Get a new harness from a return value.
+  (reharness [self r])
   ; Get and set the monadic typeclass instance.
-  (get-minstance [m])
-  (set-minstance [self m])
+  (get-dict [m])
+  (set-dict [self m])
   ; Run the current continuation in the harness, passing in rval.
   (execute [self rval]))
 
-(defprotocol BacktrackingState
-  (state-from [self r]))
-
-(defprotocol Snapshot
-  (restart! [self state]))
-
 ; Marker type
-(defprotocol SafeStateRval
+(defprotocol HarnessIntermediateValue
   (safe-state-rval-execute [self]))
 ; Separate deftype to ease debugging stack traces
-(deftype SafeStateRvalImpl [f s v]
-  SafeStateRval
+(deftype HarnessIntermediateValueImpl [f s v]
+  HarnessIntermediateValue
   (safe-state-rval-execute [self]
     (f s v)))
 
-(defprotocol SafeBacktracker
+; TODO expose these?
+(defprotocol HarnessResult
   (safe-backtracker-rval [self])
   (next-snap [self]))
-(deftype SafeBacktrackerImpl [r s]
-  SafeBacktracker
+(deftype HarnessResultImpl [r s]
+  HarnessResult
   (safe-backtracker-rval [_] r)
   (next-snap [_] s))
 
@@ -64,7 +59,6 @@
   (if obsolete
     (throw (IllegalStateException. "Using old reference"))))
 
-; TODO this is actually a generic stateful computation.
 (deftype SafeState [cont m ^:unsynchronized-mutable obsolete]
   Harness
   (get-cont [_]
@@ -74,75 +68,67 @@
     (set! obsolete true)
     (SafeState. c m nil))
   (return [self r]
-    (if-let [cont (get-cont self)]
-      (SafeStateRvalImpl. cont self r)
-      (SafeBacktrackerImpl. r m)))
-  (unreturn [_ r]
+    (check-obsolete obsolete)
+    (if cont
+      (HarnessIntermediateValueImpl. cont self r)
+      (HarnessResultImpl. r m)))
+  (fast-return [self r] (return self r))
+  (extract [_ r]
     (safe-backtracker-rval r))
-  (set-minstance [_ s]
+  (set-dict [_ s]
     (set! obsolete true)
     (SafeState. cont s nil))
-  (get-minstance [_]
+  (get-dict [_]
     (check-obsolete obsolete)
     m)
   (execute [self rval]
-    (if (instance? underflow.core.SafeStateRval rval)
+    (if (instance? underflow.core.HarnessIntermediateValue rval)
       (recur (safe-state-rval-execute rval))
       rval))
-  BacktrackingState
-  (state-from [self r]
-    (set-minstance self (next-snap r))))
+  (reharness [self r]
+    (set-dict self (next-snap r))))
 
-; All snapshots are only run once. That's the rule.
-; TODO snapshot cloning
 (deftype FastBacktrackingState [^:unsynchronized-mutable cont
                                 ^:unsynchronized-mutable m]
   Harness
   (set-cont [self c] (set! cont c) self) 
   (get-cont [_] cont)
   (return [_ r] r)
-  (unreturn [_ r] r)
-  (set-minstance [self s] (set! m s) self)
-  (get-minstance [_] m)
+  (fast-return [self r] (when cont (cont self r)))
+  (extract [_ r] r)
+  (set-dict [self s] (set! m s) self)
+  (get-dict [_] m)
   (execute [self rval]
     (if cont
       (recur (cont self rval))
       rval))
-  BacktrackingState
-  (state-from [self _] self))
-
-(deftype UnderflowIterator [^:unsynchronized-mutable state
-                            ^:unsynchronized-mutable nextv]
-  Iterator
-  (hasNext [_]
-    (if (get-minstance state) true false))
-  ; Needs to be called once by underflow-iterator, to set the first nextv
-  (next [self]
-    ; Make sure this nextv didn't come from the terminal snapshot
-    (if-let [next-snap (get-minstance state)]
-      ; Get the next nextv (we're always one step ahead)
-      (let [r (execute state (restart! next-snap state))
-            oldv nextv]
-        (set! state (state-from state r))
-        (set! nextv (unreturn state r))
-        oldv)
-      (throw (java.util.NoSuchElementException.))))
-  (remove [_]
-    (throw (UnsupportedOperationException.))))
+  (reharness [self _] self))
 
 (defn safe-harness [] (SafeState. nil nil nil))
 (defn fast-harness [] (FastBacktrackingState. nil nil))
 
 ; Core macros
-
 (defmacro =fn
   "Turn a fn of one argument into a state-passing fn."
   [[arg] & body]
   `(fn [~'*state* ~arg] ~@body))
 
+(defmacro =named-fn
+  [name [arg] & body]
+  `(fn ~name [~'*state* ~arg] ~@body))
+
 (defmacro =return
   [& body]
   `(return ~'*state* (do ~@body)))
+
+(defmacro =call
+  [f arg]
+  `(~f ~'*state* ~arg))
+
+(defmacro =>return
+  "Like =return, but consumes stack in the fast implementation."
+  [& body]
+  `(fast-return ~'*state* (do ~@body)))
 
 (defmacro =bindone
   [[bindingf bindingv] & body]
@@ -153,77 +139,17 @@
                                     ~@body)))]
      ~bindingv))
 
-  ; TODO not core macros
+; Extended macros
+
 (defmacro =letone
   [[bindingf bindingv] & body]
   `(=bindone [~bindingf (=return ~bindingv)] ~@body))
 
+; TODO tailreturn
+; maybe =continue instead?
 (defmacro =tailcall
   [& body]
   `(=letone [~'_ nil] ~@body))
-
-; TODO tailreturn
-
-(defn save-helper [saved-stack-sym saved-snap-sym exprs]
-  (if-let [expr (first exprs)]
-    `(reify Snapshot
-       (restart! [self# ~'*state*]
-         (let [~'*state* (-> ~'*state*
-                           (set-minstance ~(save-helper
-                                              saved-stack-sym saved-snap-sym
-                                              (rest exprs)))
-                           (set-cont ~saved-stack-sym))]
-           ~expr)))
-    saved-snap-sym))
-
-(defmacro =save-exprs! [etbody & exprs]
-  (let [saved-sym (gensym "stack-snap")
-        snap-sym (gensym "snap")]
-    `(let [~saved-sym (get-cont ~'*state*)
-           ~snap-sym (get-minstance ~'*state*)
-           snap# ~(save-helper saved-sym snap-sym exprs)
-           ~'*state* (set-minstance ~'*state* snap#)]
-       ~etbody)))
-
-; TODO retry that doesn't consume stack
-(defmacro =retry
-  []
-  ; TODO don't need to pass state twice?
-  `(if-let [s# (get-minstance ~'*state*)]
-     (restart! s# ~'*state*)
-     (=return nil)))
-
-; Extended macros
-
-(defmacro =amb
-  ([] `(=retry))
-  ([body] body)
-  ([body & bodies]
-   `(=save-exprs! ~body ~@bodies)))
-
-(defmacro =ambv
-  [& bodies]
-  `(=amb ~@(map (fn [x] `(=return ~x)) bodies)))
-
-; TODO there's mutability here
-(defn iterator-snapshot [^Iterator iterator old-state]
-  (let [old-stack (get-cont old-state)
-        old-snap (get-minstance old-state)]
-    (reify Snapshot
-      (restart! [self *state*]
-        (let [*state* (set-cont *state* old-stack)]
-          (if (.hasNext iterator)
-            (=return (.next iterator))
-            ; when iterator is exhausted, remove us from the stack
-            ; and restore the previous snapshot
-            (let [*state* (set-minstance old-state old-snap)]
-              (=retry))))))))
-
-(defmacro =amb-iterate [iterable]
-  `(let [i# (.iterator ~(vary-meta iterable assoc :tag `Iterable))
-         newsnap# (iterator-snapshot i# ~'*state*)
-         ~'*state* (set-minstance ~'*state* newsnap#)]
-     (restart! newsnap# ~'*state*)))
 
 (defmacro =bind [bindings & body]
   "Like let, but the binding vals may themselves be Underflow fns,
@@ -232,7 +158,7 @@
     `(do ~@body)
     (let [tvar (first bindings)
           tval (second bindings)]
-      (if (nil? tval)
+      (if-not (seq (rest bindings))
         (throw (IllegalArgumentException.
                  "=bind requires an even number of forms in binding vector"))
         `(=bindone [~tvar ~tval]
@@ -243,7 +169,7 @@
     `(do ~@body)
     (let [tvar (first bindings)
           tval (second bindings)]
-      (if (nil? tval)
+      (if-not (seq (rest bindings))
         (throw (IllegalArgumentException.
                  "=let requires an even number of forms in binding vector"))
         `(=letone [~tvar ~tval]
@@ -265,31 +191,4 @@
   [state & body]
   `(let [~'*state* ~state
          rval# (do ~@body)]
-     (unreturn ~'*state* (execute ~'*state* rval#))))
-
-; Used to gracefully terminate at the end of a computation, by returning nil.
-(def terminal-snapshot
-  (reify Snapshot
-    (restart! [self *state*]
-      (let [*state* (-> *state*
-                      (set-minstance nil)
-                      (set-cont nil))]
-        (=return nil)))))
-
-(defn do-underflow-iterator [state snap]
-  (let [state (set-minstance state snap)
-        iterator (UnderflowIterator. state nil)]
-    ; Must get next and throw away the first value
-    (.next iterator)
-    iterator))
-
-(defmacro underflow-iterator [state & body]
-  `(let [sfn# (reify Snapshot
-                (restart! [~'_ ~'*state*]
-                  (let [~'*state* (set-minstance ~'*state* terminal-snapshot)]
-                    ~@body)))]
-     (do-underflow-iterator ~state sfn#)))
-
-(defmacro underflow-seq [state & body]
-  ; TODO check thread safety of this
-  `(iterator-seq (underflow-iterator ~state ~@body)))
+     (extract ~'*state* (execute ~'*state* rval#))))

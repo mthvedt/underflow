@@ -1,5 +1,5 @@
-(ns underflow.test.core
-  (use clojure.test underflow.core))
+(ns underflow.test.amb
+  (use clojure.test underflow.core underflow.amb))
 
 (defmacro test-underflow [expected & body]
   `(let [expected# ~expected
@@ -72,6 +72,12 @@
            (=iterate-crawl x))
     (=return tree)))
 
+(=defn iterate-crawl-2 [tree]
+  (if (coll? tree)
+    (=bind [x (=>amb-iterate tree)]
+           (=iterate-crawl x))
+    (=>return tree)))
+
 (deftest test-amb-crawl
   (test-underflow 1 (=amb-crawl mytree)))
 
@@ -106,7 +112,7 @@
 
 (=defn iterate-crawl-test [_]
        (=bind [node1 (=amb-iterate [1 2 3])
-               node2 (=amb-iterate [4 5 6])]
+               node2 (=>amb-iterate [4 5 6])]
               (=return [node1 node2])))
 
 (deftest test-amb
@@ -120,4 +126,5 @@
     (=iterate-crawl-test nil))
   (test-amb [] (=amb))
   (test-amb [] (=ambv))
-  (test-amb [] (=amb-iterate [])))
+  (test-amb [] (=amb-iterate []))
+  (test-amb [] (=>amb-iterate [])))
