@@ -37,14 +37,18 @@
   ; Run the current continuation in the harness, passing in rval.
   (execute [self rval]))
 
+(defprotocol Continuation
+  ; TODO run-cont
+  (call-cont [self harness rval]))
+
 ; Marker type
 (defprotocol HarnessIntermediateValue
   (safe-state-rval-execute [self]))
 ; Separate deftype to ease debugging stack traces
-(deftype HarnessIntermediateValueImpl [f s v]
+(deftype HarnessIntermediateValueImpl [c s v]
   HarnessIntermediateValue
   (safe-state-rval-execute [self]
-    (f s v)))
+    (call-cont c s v)))
 
 ; TODO expose these?
 (defprotocol HarnessResult
@@ -94,13 +98,13 @@
   (set-cont [self c] (set! cont c) self) 
   (get-cont [_] cont)
   (return [_ r] r)
-  (fast-return [self r] (when cont (cont self r)))
+  (fast-return [self r] (when cont (call-cont cont self r)))
   (extract [_ r] r)
   (set-dict [self s] (set! m s) self)
   (get-dict [_] m)
   (execute [self rval]
     (if cont
-      (recur (cont self rval))
+      (recur (call-cont cont self rval))
       rval))
   (reharness [self _] self))
 
@@ -111,11 +115,16 @@
 (defmacro =fn
   "Turn a fn of one argument into a state-passing fn."
   [[arg] & body]
-  `(fn [~'*state* ~arg] ~@body))
+  `(reify Continuation
+     (call-cont [~'_ ~'*state* ~arg] ~@body)))
 
 (defmacro =named-fn
   [name [arg] & body]
-  `(fn ~name [~'*state* ~arg] ~@body))
+  `(reify Continuation
+     (call-cont [self# ~'*state* ~arg]
+       ; This fn should die in escape analysis. TODO TEST
+       (let [~name (fn [arg# state#] (call-cont self# arg# state#))]
+         ~@body))))
 
 (defmacro =return
   [& body]
@@ -129,6 +138,11 @@
   "Like =return, but consumes stack in the fast implementation."
   [& body]
   `(fast-return ~'*state* (do ~@body)))
+
+(defmacro =with-cont
+  "Totally overrides the old continuation. Use with caution."
+  [cont & body]
+  `(let [~'*state* (set-cont ~'*state* ~cont)] ~@body))
 
 (defmacro =bindone
   [[bindingf bindingv] & body]
@@ -145,8 +159,6 @@
   [[bindingf bindingv] & body]
   `(=bindone [~bindingf (=return ~bindingv)] ~@body))
 
-; TODO tailreturn
-; maybe =continue instead?
 (defmacro =tailcall
   [& body]
   `(=letone [~'_ nil] ~@body))
@@ -178,7 +190,7 @@
 (defmacro =declare [sym]
   `(do
      (declare ~sym)
-     (defmacro ~(symbol (str "=" sym)) [arg#] `(~'~sym ~~''*state* ~arg#))))
+     (defmacro ~(symbol (str "=" sym)) [arg#] `(call-cont ~'~sym ~~''*state* ~arg#))))
 
 (defmacro =defn [sym [arg] & body]
   `(do

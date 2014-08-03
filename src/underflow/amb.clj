@@ -8,6 +8,7 @@
 (defprotocol Snapshot
   (run-snapshot [self state]))
 
+; TODO something preventing optimization here
 (deftype UnderflowIterator [^:unsynchronized-mutable state
                             ^:unsynchronized-mutable nextv]
   Iterator
@@ -27,16 +28,23 @@
   (remove [_]
     (throw (UnsupportedOperationException.))))
 
+(defmacro snapshot [& body]
+  `(reify Snapshot
+     ; TODO don't do this
+     (run-snapshot [~'_ ~'*state*] ~@body)
+     Continuation
+     ; Avoid double-dispatching on =retry
+     (call-cont [self# ~'*state* ~'_] ~@body)))
+
 (defn save-helper [saved-stack-sym saved-snap-sym exprs]
   (if-let [expr (first exprs)]
-    `(reify Snapshot
-       (run-snapshot [self# ~'*state*]
-         (let [~'*state* (-> ~'*state*
-                           (set-dict ~(save-helper
-                                              saved-stack-sym saved-snap-sym
-                                              (rest exprs)))
-                           (set-cont ~saved-stack-sym))]
-           ~expr)))
+    `(snapshot
+       (let [~'*state* (-> ~'*state*
+                         (set-dict ~(save-helper
+                                      saved-stack-sym saved-snap-sym
+                                      (rest exprs)))
+                         (set-cont ~saved-stack-sym))]
+         ~expr))
     saved-snap-sym))
 
 (defmacro =save-exprs! [etbody & exprs]
@@ -51,14 +59,22 @@
 (defmacro =retry
   []
   `(if-let [s# (get-dict ~'*state*)]
+     ;(throw (IllegalStateException.))
      ; This trick sets the continuation to (run-snapshot ...) and returns nil
-     (=letone [~'_ nil] (run-snapshot s# ~'*state*))
+     ; TODO no tricks
+     ;(call-cont s# ~'*state* nil)
+     ;TODO this is a regression. why?
+     (=with-cont s# (=>return nil))
+     ;(=bindone [~'_ nil] (run-snapshot s# ~'*state*))
      (=return nil)))
 
 (defmacro =>retry
   []
   `(if-let [s# (get-dict ~'*state*)]
-     (run-snapshot s# ~'*state*)
+     ; TODO regression here also. why?
+     ;(=with-cont s# (=>return nil))
+     ;(run-snapshot s# ~'*state*)
+     (call-cont s# ~'*state* nil)
      (=>return nil)))
 
 ; TODO nomenclature. don't use =amb/=ambv
@@ -75,54 +91,80 @@
 ; TODO there's mutability here
 (defn iterator-snapshot
   [^Iterator iterator old-state]
-  (let [old-stack (get-cont old-state)
+  (let [old-cont (get-cont old-state)
         old-snap (get-dict old-state)]
-    (reify Snapshot
-      (run-snapshot [self *state*]
-        (let [*state* (set-cont *state* old-stack)]
-          (if (.hasNext iterator)
-            (=return (.next iterator))
-            ; when iterator is exhausted, remove us from the stack
-            ; and restore the previous snapshot
-            (let [*state* (set-dict old-state old-snap)]
-              (=retry))))))))
+    (snapshot
+      (let [*state* (set-cont *state* old-cont)]
+        (if (.hasNext iterator)
+          (=return (.next iterator))
+          ; when iterator is exhausted, remove us from the stack
+          ; and restore the previous snapshot
+          (let [*state* (set-dict old-state old-snap)]
+            (=retry)))))))
 
 (defn push-iterator-snapshot
   [^Iterator iterator old-state]
-  (let [old-stack (get-cont old-state)
+  (let [old-cont (get-cont old-state)
         old-snap (get-dict old-state)]
-    (reify Snapshot
-      (run-snapshot [self *state*]
-        (let [*state* (set-cont *state* old-stack)]
-          (if (.hasNext iterator)
-            (=>return (.next iterator))
-            ; when iterator is exhausted, remove us from the stack
-            ; and restore the previous snapshot
-            (let [*state* (set-dict old-state old-snap)]
-              (=>retry))))))))
+    (snapshot 
+      (let [*state* (set-cont *state* old-cont)]
+        (if (.hasNext iterator)
+          (=>return (.next iterator))
+          ; when iterator is exhausted, remove us from the stack
+          ; and restore the previous snapshot
+          (let [*state* (set-dict old-state old-snap)]
+            (=>retry)))))))
+
+(defmacro =amb-iterate-experiment
+  [iterable-form]
+  (let [isym (gensym "iterable")]
+    `(let [~isym ~iterable-form
+           old-cont# (get-cont ~'*state*)
+           old-snap# (get-dict ~'*state*)
+           iterator# (.iterator ~(vary-meta isym assoc :tag `Iterable))]
+       (if (.hasNext iterator#)
+         (let [newsnap# (snapshot
+                          (let [~'*state* (set-cont ~'*state* old-cont#)]
+                            (if (.hasNext iterator#)
+                              (=>return (.next iterator#))
+                              ; when iterator is exhausted, remove us from the stack
+                              ; and restore the previous snapshot
+                              (let [~'*state* (set-dict ~'*state* old-snap#)]
+                                (=>retry)))))
+               ~'*state* (set-dict ~'*state* newsnap#)]
+           (=>return (.next iterator#)))
+         (=>retry)))))
 
 (defmacro =amb-iterate
   [iterable]
-  `(let [i# (.iterator ~(vary-meta iterable assoc :tag `Iterable))
-         newsnap# (iterator-snapshot i# ~'*state*)
-         ~'*state* (set-dict ~'*state* newsnap#)]
-     (run-snapshot newsnap# ~'*state*)))
+  `(let [i# (.iterator ~(vary-meta iterable assoc :tag `Iterable))]
+     (if (.hasNext i#)
+       (let [newsnap# (iterator-snapshot i# ~'*state*)
+             ~'*state* (set-dict ~'*state* newsnap#)]
+         (=return (.next i#)))
+       (=retry))))
 
 (defmacro =>amb-iterate
   [iterable]
-  `(let [i# (.iterator ~(vary-meta iterable assoc :tag `Iterable))
-         newsnap# (push-iterator-snapshot i# ~'*state*)
-         ~'*state* (set-dict ~'*state* newsnap#)]
-     (run-snapshot newsnap# ~'*state*)))
+  `(let [i# (.iterator ~(vary-meta iterable assoc :tag `Iterable))]
+     (if (.hasNext i#)
+       (let [newsnap# (push-iterator-snapshot i# ~'*state*)
+             ~'*state* (set-dict ~'*state* newsnap#)]
+         (=>return (.next i#)))
+       (=>retry))))
 
-; Used to gracefully terminate at the end of a computation, by returning nil.
-(def terminal-snapshot
-  (reify Snapshot
-    (run-snapshot [self *state*]
-      (let [*state* (-> *state*
-                      (set-dict nil)
-                      (set-cont nil))]
-        (=return nil)))))
+; Used to gracefully terminate at the end of a computation by returning nil.
+(deftype TerminalSnapshot []
+  Snapshot
+  (run-snapshot [self *state*]
+    (let [*state* (-> *state*
+                    (set-dict nil)
+                    (set-cont nil))]
+      (=return nil)))
+  Continuation
+  (call-cont [self *state* _]
+    (run-snapshot self *state*)))
+(def terminal-snapshot (TerminalSnapshot.))
 
 (defn do-underflow-iterator [state snap]
   (let [state (set-dict state snap)
@@ -132,10 +174,9 @@
     iterator))
 
 (defmacro underflow-iterator [state & body]
-  `(let [sfn# (reify Snapshot
-                (run-snapshot [~'_ ~'*state*]
-                  (let [~'*state* (set-dict ~'*state* terminal-snapshot)]
-                    ~@body)))]
+  `(let [sfn# (snapshot
+                (let [~'*state* (set-dict ~'*state* terminal-snapshot)]
+                  ~@body))]
      (do-underflow-iterator ~state sfn#)))
 
 (defmacro underflow-seq [state & body]
