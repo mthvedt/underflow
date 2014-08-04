@@ -98,7 +98,7 @@
   (set-cont [self c] (set! cont c) self) 
   (get-cont [_] cont)
   (return [_ r] r)
-  (fast-return [self r] (when cont (call-cont cont self r)))
+  (fast-return [self r] (if cont (call-cont cont self r) r))
   (extract [_ r] r)
   (set-dict [self s] (set! m s) self)
   (get-dict [_] m)

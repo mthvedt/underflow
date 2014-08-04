@@ -90,7 +90,9 @@
 
 (deftest test-dft-continuations
          (test-amb [1 2 3 4 5 6 7] (=amb-crawl mytree))
-         (test-amb [1 2 3 4 5 6 7] (=iterate-crawl mytree)))
+         (test-amb [1 2 3 4 5 6 7] (=iterate-crawl mytree))
+         (test-amb [1 2 3 4 5 6 7] (=iterate-crawl-2 mytree))
+         (test-amb [1 2 3 4 5 6 7] (=iterate-crawl-3 mytree)))
 
 (=defn multi-crawl-1 [_]
        (=bind [node1 (=amb-crawl [1 [2 3]])

@@ -1,0 +1,260 @@
+Performing task 'test' with profile(s): 'bench'
+Benchmarking:  Recursive fib
+Estimating sampling overhead
+Warming up for JIT optimisations 10000000000 ...
+  compilation occured before 228360 iterations
+  compilation occured before 913290 iterations
+  compilation occured before 1369910 iterations
+  compilation occured before 2054840 iterations
+  compilation occured before 4566250 iterations
+  compilation occured before 6621040 iterations
+  compilation occured before 9817380 iterations
+  compilation occured before 21461190 iterations
+  compilation occured before 28082180 iterations
+  compilation occured before 29680350 iterations
+  compilation occured before 29908660 iterations
+  compilation occured before 54566140 iterations
+  compilation occured before 57534170 iterations
+  compilation occured before 57990790 iterations
+  compilation occured before 58675720 iterations
+  compilation occured before 58904030 iterations
+  compilation occured before 80365170 iterations
+  compilation occured before 83333200 iterations
+  compilation occured before 87671090 iterations
+  compilation occured before 88356020 iterations
+  compilation occured before 100684760 iterations
+  compilation occured before 169406070 iterations
+  compilation occured before 284246000 iterations
+  compilation occured before 284474310 iterations
+  compilation occured before 287898960 iterations
+  compilation occured before 370090560 iterations
+  compilation occured before 554108420 iterations
+  compilation occured before 593149430 iterations
+  compilation occured before 593377740 iterations
+  compilation occured before 618720150 iterations
+  compilation occured before 618948460 iterations
+  compilation occured before 619405080 iterations
+  compilation occured before 619633390 iterations
+  compilation occured before 845203670 iterations
+  compilation occured before 871687630 iterations
+  compilation occured before 871915940 iterations
+  compilation occured before 872829180 iterations
+  compilation occured before 1046801400 iterations
+  compilation occured before 1227394610 iterations
+  compilation occured before 1229221090 iterations
+  compilation occured before 1230134330 iterations
+  compilation occured before 1230819260 iterations
+  compilation occured before 1254106880 iterations
+  compilation occured before 1257303220 iterations
+  compilation occured before 1259129700 iterations
+  compilation occured before 1260499560 iterations
+Estimating execution count ...
+Sampling ...
+Final GC...
+Checking GC...
+WARNING: Final GC required 1.365857063769923 % of runtime
+Finding outliers ...
+Bootstrapping ...
+Checking outlier significance
+Warming up for JIT optimisations 10000000000 ...
+  compilation occured before 1 iterations
+  compilation occured before 2850 iterations
+  compilation occured before 5699 iterations
+  compilation occured before 11397 iterations
+  compilation occured before 54132 iterations
+Estimating execution count ...
+Sampling ...
+Final GC...
+Checking GC...
+Finding outliers ...
+Bootstrapping ...
+Checking outlier significance
+Evaluation count : 1692060 in 60 samples of 28201 calls.
+             Execution time mean : 36.184763 µs
+    Execution time std-deviation : 652.655563 ns
+   Execution time lower quantile : 35.134365 µs ( 2.5%)
+   Execution time upper quantile : 37.285607 µs (97.5%)
+                   Overhead used : 1.835457 ns
+====
+Benchmarking:  Fast fib
+Warming up for JIT optimisations 10000000000 ...
+  compilation occured before 458740 iterations
+  compilation occured before 1376170 iterations
+  compilation occured before 1834885 iterations
+  compilation occured before 4128460 iterations
+  compilation occured before 4587175 iterations
+  compilation occured before 20183485 iterations
+  compilation occured before 59632975 iterations
+Estimating execution count ...
+Sampling ...
+Final GC...
+Checking GC...
+Finding outliers ...
+Bootstrapping ...
+Checking outlier significance
+Evaluation count : 2811702240 in 60 samples of 46861704 calls.
+             Execution time mean : 19.552048 ns
+    Execution time std-deviation : 0.234545 ns
+   Execution time lower quantile : 19.148671 ns ( 2.5%)
+   Execution time upper quantile : 19.996549 ns (97.5%)
+                   Overhead used : 1.835457 ns
+====
+Benchmarking:  Underflow fib
+Warming up for JIT optimisations 10000000000 ...
+  compilation occured before 1 iterations
+  compilation occured before 882 iterations
+  compilation occured before 6168 iterations
+Estimating execution count ...
+Sampling ...
+Final GC...
+Checking GC...
+Finding outliers ...
+Bootstrapping ...
+Checking outlier significance
+Evaluation count : 744360 in 60 samples of 12406 calls.
+             Execution time mean : 80.434827 µs
+    Execution time std-deviation : 889.048381 ns
+   Execution time lower quantile : 78.763198 µs ( 2.5%)
+   Execution time upper quantile : 82.314786 µs (97.5%)
+                   Overhead used : 1.835457 ns
+====
+Benchmarking:  Tree crawler
+Warming up for JIT optimisations 10000000000 ...
+  compilation occured before 11400 iterations
+  compilation occured before 22799 iterations
+Estimating execution count ...
+Sampling ...
+Final GC...
+Checking GC...
+Finding outliers ...
+Bootstrapping ...
+Checking outlier significance
+Evaluation count : 7055820 in 60 samples of 117597 calls.
+             Execution time mean : 8.504244 µs
+    Execution time std-deviation : 163.297659 ns
+   Execution time lower quantile : 8.303130 µs ( 2.5%)
+   Execution time upper quantile : 8.693130 µs (97.5%)
+                   Overhead used : 1.835457 ns
+
+Found 1 outliers in 60 samples (1.6667 %)
+	low-severe	 1 (1.6667 %)
+ Variance from outliers : 7.8429 % Variance is slightly inflated by outliers
+====
+Benchmarking:  Underflow tree crawler
+Warming up for JIT optimisations 10000000000 ...
+  compilation occured before 13889 iterations
+  compilation occured before 291649 iterations
+Estimating execution count ...
+Sampling ...
+Final GC...
+Checking GC...
+Finding outliers ...
+Bootstrapping ...
+Checking outlier significance
+Evaluation count : 11503500 in 60 samples of 191725 calls.
+             Execution time mean : 5.728952 µs
+    Execution time std-deviation : 649.481244 ns
+   Execution time lower quantile : 5.162009 µs ( 2.5%)
+   Execution time upper quantile : 6.858047 µs (97.5%)
+                   Overhead used : 1.835457 ns
+====
+Benchmarking:  Underflow tree crawler iterator
+Warming up for JIT optimisations 10000000000 ...
+  compilation occured before 17019 iterations
+  compilation occured before 34037 iterations
+Estimating execution count ...
+Sampling ...
+Final GC...
+Checking GC...
+Finding outliers ...
+Bootstrapping ...
+Checking outlier significance
+Evaluation count : 13341060 in 60 samples of 222351 calls.
+             Execution time mean : 4.495265 µs
+    Execution time std-deviation : 46.687732 ns
+   Execution time lower quantile : 4.407158 µs ( 2.5%)
+   Execution time upper quantile : 4.575203 µs (97.5%)
+                   Overhead used : 1.835457 ns
+====
+Benchmarking:  Fast underflow tree crawler iterator (warm-up)
+Warming up for JIT optimisations 10000000000 ...
+  compilation occured before 16211 iterations
+Estimating execution count ...
+Sampling ...
+Final GC...
+Checking GC...
+Finding outliers ...
+Bootstrapping ...
+Checking outlier significance
+Evaluation count : 51989820 in 60 samples of 866497 calls.
+             Execution time mean : 1.162324 µs
+    Execution time std-deviation : 13.902450 ns
+   Execution time lower quantile : 1.142060 µs ( 2.5%)
+   Execution time upper quantile : 1.189673 µs (97.5%)
+                   Overhead used : 1.835457 ns
+
+Found 1 outliers in 60 samples (1.6667 %)
+	low-severe	 1 (1.6667 %)
+ Variance from outliers : 1.6389 % Variance is slightly inflated by outliers
+====
+Benchmarking:  Fast underflow tree crawler iterator, with =>return
+Warming up for JIT optimisations 10000000000 ...
+  compilation occured before 13370 iterations
+  compilation occured before 26738 iterations
+  compilation occured before 120314 iterations
+  compilation occured before 1443746 iterations
+Estimating execution count ...
+Sampling ...
+Final GC...
+Checking GC...
+Finding outliers ...
+Bootstrapping ...
+Checking outlier significance
+Evaluation count : 57843180 in 60 samples of 964053 calls.
+             Execution time mean : 1.034847 µs
+    Execution time std-deviation : 13.647802 ns
+   Execution time lower quantile : 1.012643 µs ( 2.5%)
+   Execution time upper quantile : 1.063784 µs (97.5%)
+                   Overhead used : 1.835457 ns
+====
+Benchmarking:  Fast underflow tree crawler iterator, with inline macros
+Warming up for JIT optimisations 10000000000 ...
+  compilation occured before 22208 iterations
+Estimating execution count ...
+Sampling ...
+Final GC...
+Checking GC...
+Finding outliers ...
+Bootstrapping ...
+Checking outlier significance
+Evaluation count : 58797420 in 60 samples of 979957 calls.
+             Execution time mean : 1.033235 µs
+    Execution time std-deviation : 12.042255 ns
+   Execution time lower quantile : 1.011117 µs ( 2.5%)
+   Execution time upper quantile : 1.054007 µs (97.5%)
+                   Overhead used : 1.835457 ns
+====
+Benchmarking:  Fast underflow tree crawler redux
+Warming up for JIT optimisations 10000000000 ...
+  compilation occured before 204930 iterations
+Estimating execution count ...
+Sampling ...
+Final GC...
+Checking GC...
+Finding outliers ...
+Bootstrapping ...
+Checking outlier significance
+Evaluation count : 51651960 in 60 samples of 860866 calls.
+             Execution time mean : 1.151616 µs
+    Execution time std-deviation : 12.872663 ns
+   Execution time lower quantile : 1.128818 µs ( 2.5%)
+   Execution time upper quantile : 1.175672 µs (97.5%)
+                   Overhead used : 1.835457 ns
+====
+
+lein test underflow.perf.amb
+
+lein test underflow.test.amb
+
+Ran 9 tests containing 51 assertions.
+0 failures, 0 errors.

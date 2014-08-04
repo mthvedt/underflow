@@ -5,8 +5,6 @@
 
 ; All snapshots are only run once. That's the rule.
 ; TODO snapshot cloning
-(defprotocol Snapshot
-  (run-snapshot [self state]))
 
 ; TODO something preventing optimization here
 (deftype UnderflowIterator [^:unsynchronized-mutable state
@@ -19,7 +17,7 @@
     ; Make sure this nextv didn't come from the terminal snapshot
     (if-let [next-snap (get-dict state)]
       ; Get the next nextv (we're always one step ahead)
-      (let [r (execute state (run-snapshot next-snap state))
+      (let [r (execute state (call-cont next-snap state nil))
             oldv nextv]
         (set! state (reharness state r))
         (set! nextv (extract state r))
@@ -29,11 +27,7 @@
     (throw (UnsupportedOperationException.))))
 
 (defmacro snapshot [& body]
-  `(reify Snapshot
-     ; TODO don't do this
-     (run-snapshot [~'_ ~'*state*] ~@body)
-     Continuation
-     ; Avoid double-dispatching on =retry
+  `(reify Continuation
      (call-cont [self# ~'*state* ~'_] ~@body)))
 
 (defn save-helper [saved-stack-sym saved-snap-sym exprs]
@@ -59,21 +53,15 @@
 (defmacro =retry
   []
   `(if-let [s# (get-dict ~'*state*)]
-     ;(throw (IllegalStateException.))
-     ; This trick sets the continuation to (run-snapshot ...) and returns nil
-     ; TODO no tricks
-     ;(call-cont s# ~'*state* nil)
      ;TODO this is a regression. why?
-     (=with-cont s# (=>return nil))
-     ;(=bindone [~'_ nil] (run-snapshot s# ~'*state*))
+     (=with-cont s# (=return nil))
      (=return nil)))
 
 (defmacro =>retry
   []
   `(if-let [s# (get-dict ~'*state*)]
-     ; TODO regression here also. why?
+     ; TODO is this a regression?
      ;(=with-cont s# (=>return nil))
-     ;(run-snapshot s# ~'*state*)
      (call-cont s# ~'*state* nil)
      (=>return nil)))
 
@@ -155,15 +143,12 @@
 
 ; Used to gracefully terminate at the end of a computation by returning nil.
 (deftype TerminalSnapshot []
-  Snapshot
-  (run-snapshot [self *state*]
+  Continuation
+  (call-cont [self *state* _]
     (let [*state* (-> *state*
                     (set-dict nil)
                     (set-cont nil))]
-      (=return nil)))
-  Continuation
-  (call-cont [self *state* _]
-    (run-snapshot self *state*)))
+      (=return nil))))
 (def terminal-snapshot (TerminalSnapshot.))
 
 (defn do-underflow-iterator [state snap]
