@@ -10,5 +10,6 @@
                      :jvm-opts ^:replace []}}
   :aliases {"bench-detail" ["with-profile" "bench-detail" "test"]
             "bench" ["with-profile" "bench" "test"]}
+  :java-source-paths ["java"]
   :dependencies [[criterium "0.4.3" :scope "test"]
                  [org.clojure/clojure "1.6.0"]])
