@@ -7,7 +7,7 @@
 ; All snapshots are only run once. That's the rule.
 ; TODO snapshot cloning
 
-; TODO something preventing optimization here
+; TODO something is preventing optimizing the dispatches in this class.
 (deftype UnderflowIterator [^:unsynchronized-mutable ^Harness state
                             ^:unsynchronized-mutable nextv]
   Iterator
@@ -16,7 +16,7 @@
   ; Needs to be called once by underflow-iterator, to set the first nextv
   (next [self]
     ; Make sure this nextv didn't come from the terminal snapshot
-    (if-let [next-snap (.getDict state)]
+    (if-let [^Continuation next-snap (.getDict state)]
       ; Get the next nextv (we're always one step ahead)
       (let [r (.execute state (.call next-snap state nil))
             oldv nextv]
@@ -40,7 +40,7 @@
                                       (rest exprs)))
                          (.setCont ~saved-stack-sym))]
          ~expr))
-    saved-snap-sym))
+    (tag saved-snap-sym `Snapshot)))
 
 (defmacro =save-exprs! [etbody & exprs]
   (let [saved-sym (gensym "stack-snap")
@@ -53,17 +53,19 @@
 
 (defmacro =retry
   []
-  `(if-let [s# (.getDict ~'*state*)]
-     ; Major slowdown, but means failure doesn't consume a stack frame
-     (=with-cont s# (=return nil))
-     (=return nil)))
+  (let [ss (tag (gensym "snap") `Continuation)]
+    `(if-let [~ss (.getDict ~'*state*)]
+       ; Major slowdown, but means failure doesn't consume a stack frame
+       (=with-cont ~ss (=return nil))
+       (=return nil))))
 
 (defmacro =>retry
   []
-  `(if-let [s# (.getDict ~'*state*)]
-     ; TODO is this a regression?
-     (=with-cont s# (=>return nil))
-     (=>return nil)))
+  (let [ss (tag (gensym "snap") `Continuation)]
+    `(if-let [~ss (.getDict ~'*state*)]
+       ; TODO is this a regression?
+       (=with-cont ~ss (=>return nil))
+       (=>return nil))))
 
 ; TODO nomenclature. don't use =amb/=ambv
 (defmacro =amb
@@ -105,11 +107,11 @@
 
 (defmacro =amb-iterate-experiment
   [iterable-form]
-  (let [isym (gensym "iterable")]
+  (let [isym (tag (gensym "iterable") `Iterable)]
     `(let [~isym ~iterable-form
            old-cont# (.getCont ~'*state*)
            old-snap# (.getDict ~'*state*)
-           iterator# (.iterator ~(tag isym `Iterable))]
+           iterator# (.iterator ~isym)]
        (if (.hasNext iterator#)
          (let [newsnap# (snapshot
                           (let [~'*state* (.setCont ~'*state* old-cont#)]
@@ -125,21 +127,25 @@
 
 (defmacro =amb-iterate
   [iterable]
-  `(let [i# (.iterator ~(tag iterable `Iterable))]
-     (if (.hasNext i#)
-       (let [newsnap# (iterator-snapshot i# ~'*state*)
-             ~'*state* (.setDict ~'*state* newsnap#)]
-         (=return (.next i#)))
-       (=retry))))
+  (let [ibs (tag (gensym "iterable") `Iterable)]
+    `(let [~ibs ~iterable
+           i# (.iterator ~ibs)]
+       (if (.hasNext i#)
+         (let [newsnap# (iterator-snapshot i# ~'*state*)
+               ~'*state* (.setDict ~'*state* newsnap#)]
+           (=return (.next i#)))
+         (=retry)))))
 
 (defmacro =>amb-iterate
   [iterable]
-  `(let [i# (.iterator ~(tag iterable `Iterable))]
-     (if (.hasNext i#)
-       (let [newsnap# (push-iterator-snapshot i# ~'*state*)
-             ~'*state* (.setDict ~'*state* newsnap#)]
-         (=>return (.next i#)))
-       (=>retry))))
+  (let [ibs (tag (gensym "iterable") `Iterable)]
+    `(let [~ibs ~iterable
+           i# (.iterator ~ibs)]
+       (if (.hasNext i#)
+         (let [newsnap# (push-iterator-snapshot i# ~'*state*)
+               ~'*state* (.setDict ~'*state* newsnap#)]
+           (=>return (.next i#)))
+         (=>retry)))))
 
 ; Used to gracefully terminate at the end of a computation by returning nil.
 (deftype TerminalSnapshot []

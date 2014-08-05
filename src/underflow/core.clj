@@ -19,8 +19,10 @@
 
 (defn tag [sym tag] (vary-meta sym assoc :tag tag))
 
-(defn safe-harness [] (underflow.java.SafeHarness. nil nil))
-(defn fast-harness [] (underflow.java.FastHarness. nil nil))
+(defn ^Harness safe-harness [] (underflow.java.SafeHarness. nil nil))
+(defn ^Harness fast-harness [] (underflow.java.FastHarness. nil nil))
+
+; TODO get-dict, set-dict macros
 
 ; Core macros
 (defmacro =fn
@@ -33,7 +35,7 @@
   [name [arg] & body]
   `(reify Continuation
      (call [self# ~'*state* ~arg]
-       ; This fn should die in escape analysis. TODO TEST
+       ; This fn should usually die in escape analysis. TODO TEST
        (let [~name (fn [arg# state#] (.call self# arg# state#))]
          ~@body))))
 
@@ -109,7 +111,7 @@
 (defmacro =defn [sym [arg] & body]
   `(do
      (=declare ~sym)
-     (def ~sym (=fn [~arg] ~@body))))
+     (def ~(tag sym `Continuation) (=fn [~arg] ~@body))))
 
 ; Underflow
 

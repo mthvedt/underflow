@@ -1,9 +1,10 @@
 # Underflow
 
-This repository is an implementation of monads that provides:
+Underflow is a very fast implementation of McCarthy's `amb` operator for clojure. It has:
+
 * a trampolining monad 'harness' that prevents stack overflow
 * an evil, stateful, fast version of the same harness that is interface-compatible
-* a monad dictionary protocol for use with said harness
+* various macros for various `amb` operations using the harness
 
 Underflow is not yet ready for prime time. Use with extreme caution.
 

@@ -9,7 +9,7 @@
      (println "====")))
 
 (defn- recursive-fib [x]
-  (case x
+  (case (int x)
     0 1
     1 1
     (+ (recursive-fib (- x 1)) (recursive-fib (- x 2)))))

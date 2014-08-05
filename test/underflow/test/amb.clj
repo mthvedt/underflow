@@ -30,7 +30,7 @@
   (test-underflow true (=funny-odd? 11)))
 
 (=defn fib [x]
-       (case x
+       (case (int x)
          0 (=return 1)
          1 (=return 1)
          (=bind [a (=fib (- x 1))
