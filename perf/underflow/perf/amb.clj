@@ -9,7 +9,7 @@
      (println "====")))
 
 (defn- recursive-fib [x]
-  (case (int x)
+  (case x
     0 1
     1 1
     (+ (recursive-fib (- x 1)) (recursive-fib (- x 2)))))
@@ -36,33 +36,42 @@
     (list tree)))
 
 (def test-tree [[[[1 2] 3] [4 5]] [6 [[7 8] [9 10]]]])
+(def test-tree-arrays
+  ((fn f [tree]
+     (if (coll? tree)
+       (java.util.ArrayList. (vec (map f tree)))
+       tree))
+     test-tree))
 
 (t/deftest test-tree-check
   (t/is (= (vec (crawl-tree test-tree))
-           (vec (underflow-seq (fast-harness) (=amb-crawl test-tree)))))
+           (vec (amb-seq (fast-harness) (=amb-crawl test-tree)))))
   (t/is (= (vec (crawl-tree test-tree))
-           (vec (underflow-seq (fast-harness) (=iterate-crawl test-tree)))))
+           (vec (amb-seq (fast-harness) (=iterate-crawl test-tree)))))
   (t/is (= (vec (crawl-tree test-tree))
-           (vec (underflow-seq (fast-harness) (=iterate-crawl-2 test-tree)))))
+           (vec (amb-seq (fast-harness) (=iterate-crawl-2 test-tree)))))
   (t/is (= (vec (crawl-tree test-tree))
-           (vec (underflow-seq (fast-harness) (=iterate-crawl-3 test-tree)))))
-  (t/is (= [1 2 3 4 5 6 7 8 9 10] (vec (underflow-seq (fast-harness)
-                                                      (=amb-crawl test-tree))))))
+           (vec (amb-seq (fast-harness) (=iterate-crawl-3 test-tree)))))
+  (t/is (= (vec (crawl-tree test-tree))
+           (vec (amb-seq (fast-harness) (=iterate-crawl-3 test-tree-arrays)))))
+  (t/is (= [1 2 3 4 5 6 7 8 9 10] (vec (amb-seq (fast-harness)
+                                                (=amb-crawl test-tree))))))
 
 (defn dorun-iterator [^java.util.Iterator i]
   (while (.hasNext i)
     (.next i)))
 
 (defbench "Tree crawler" (doall (crawl-tree test-tree)))
-(defbench "Underflow tree crawler" (doall (underflow-seq (fast-harness)
-                                                         (=amb-crawl test-tree))))
+(defbench "Underflow tree crawler" (doall (amb-seq (fast-harness)
+                                                   (=amb-crawl test-tree))))
 (defbench "Underflow tree crawler iterator"
-  (dorun-iterator (underflow-iterator (fast-harness) (=amb-crawl test-tree))))
+  (dorun-iterator (amb-iterator (fast-harness) (=amb-crawl test-tree))))
 (defbench "Fast underflow tree crawler iterator (warm-up)"
-  (dorun-iterator (underflow-iterator (fast-harness) (=iterate-crawl test-tree))))
-(defbench "Fast underflow tree crawler iterator, with =>return"
-  (dorun-iterator (underflow-iterator (fast-harness) (=iterate-crawl-2 test-tree))))
+  (dorun-iterator (amb-iterator (fast-harness) (=iterate-crawl test-tree))))
 (defbench "Fast underflow tree crawler iterator, with inline macros"
-  (dorun-iterator (underflow-iterator (fast-harness) (=iterate-crawl-3 test-tree))))
+  (dorun-iterator (amb-iterator (fast-harness) (=fast-iterate-crawl test-tree))))
+(defbench "Fast underflow tree crawler iterator, with inline macros and arraylists"
+  (dorun-iterator (amb-iterator (fast-harness)
+                                (=fast-iterate-crawl test-tree-arrays))))
 (defbench "Fast underflow tree crawler redux"
-  (dorun-iterator (underflow-iterator (fast-harness) (=iterate-crawl test-tree))))
+  (dorun-iterator (amb-iterator (fast-harness) (=iterate-crawl test-tree))))

@@ -14,8 +14,7 @@
 ; * Most functionality is accomplished with macros reifying closures.
 ; This is preferred over types containing closures, to avoid the 'double dispatch'
 ; perf penalty. Any underflow operations should require no more than one polymorphic
-; dispatch. In some places, we lean on the JVM's ability to infer static bindings,
-; and hence use types containing closures.
+; dispatch.
 
 (defn tag [sym tag] (vary-meta sym assoc :tag tag))
 

@@ -1,59 +1,9 @@
 (ns underflow.test.amb
-  (use clojure.test underflow.core underflow.amb))
-
-(defmacro test-underflow [expected & body]
-  `(let [expected# ~expected
-         testf# (fn [harness#] (underflow harness# ~@body))]
-     (is (= expected# (testf# (safe-harness))))
-     (is (= expected# (testf# (fast-harness))))))
-
-(=defn basic-testf [x] (=return x))
-
-(deftest basic-test (test-underflow 1 (=basic-testf 1)))
-
-(=declare funny-odd?)
-
-(=defn funny-even? [x]
-       (if (= x 0)
-         (=return true)
-         (=tailcall (=funny-odd? (dec x)))))
-
-(=defn funny-odd? [x]
-       (if (= x 0)
-         (=return false)
-         (=tailcall (=funny-even? (dec x)))))
-
-(deftest test-tailrecur
-  (test-underflow true (=funny-even? 10))
-  (test-underflow false (=funny-even? 11))
-  (test-underflow false (=funny-odd? 10))
-  (test-underflow true (=funny-odd? 11)))
-
-(=defn fib [x]
-       (case (int x)
-         0 (=return 1)
-         1 (=return 1)
-         (=bind [a (=fib (- x 1))
-                 b (=fib (- x 2))]
-                (=return (+ a b)))))
-
-; TODO test failures. premature return shouldnt be allowed
-; (the below tests without return should fail in safe mode)
-(deftest test-let-and-bind
-  (test-underflow 6 (=let [z (+ 1 2)]
-                          (=return (+ z 3))))
-  (test-underflow 9 (=let [z (+ 1 2)
-                           z2 (+ z 3)]
-                          (=return (+ z z2))))
-  (test-underflow 9 (=let [z (+ 1 2)]
-                          (=let [z2 (+ z 3)]
-                                (=return (+ z z2)))))
-  (test-underflow 8 (=fib 5))
-  (test-underflow 89 (=fib 10)))
+  (use clojure.test underflow.core underflow.amb underflow.test.core))
 
 (defmacro test-amb [expected & body]
   `(let [expected# ~expected
-         testf# (fn [harness#] (vec (underflow-seq harness# ~@body)))]
+         testf# (fn [harness#] (vec (amb-seq harness# ~@body)))]
      (is (= ~expected (testf# (safe-harness))))
      (is (= ~expected (testf# (fast-harness))))))
 
@@ -66,69 +16,55 @@
            (=retry))
          (=return tree)))
 
-; TODO dedup and rearrange
 (=defn iterate-crawl [tree]
   (if (coll? tree)
     (=bind [x (=amb-iterate tree)]
            (=iterate-crawl x))
     (=return tree)))
 
-(=defn iterate-crawl-2 [tree]
+(=defn fast-iterate-crawl [tree]
   (if (coll? tree)
     (=bind [x (=>amb-iterate tree)]
-           (=iterate-crawl-2 x))
+           (=fast-iterate-crawl x))
     (=>return tree)))
 
-(=defn iterate-crawl-3 [tree]
-  (if (coll? tree)
-    (=bind [x (=amb-iterate-experiment tree)]
-           (=iterate-crawl-3 x))
-    (=>return tree)))
-
-(deftest test-amb-crawl
+(deftest test-amb-crawl-one
   (test-underflow 1 (=amb-crawl mytree)))
 
-(deftest test-dft-continuations
+(deftest test-amb-crawl
          (test-amb [1 2 3 4 5 6 7] (=amb-crawl mytree))
          (test-amb [1 2 3 4 5 6 7] (=iterate-crawl mytree))
-         (test-amb [1 2 3 4 5 6 7] (=iterate-crawl-2 mytree))
-         (test-amb [1 2 3 4 5 6 7] (=iterate-crawl-3 mytree)))
+         (test-amb [1 2 3 4 5 6 7] (=fast-iterate-crawl mytree)))
 
-(=defn multi-crawl-1 [_]
+(def multi-result [[1 4] [1 5] [1 6] [2 4] [2 5] [2 6] [3 4] [3 5] [3 6]])
+
+(=defn multi-amb-test-lift [_]
+       (=bind [node1 (=amblift 1 2 3)
+               node2 (=amblift 4 5 6)]
+              (=return [node1 node2])))
+
+(=defn multi-crawl [_]
        (=bind [node1 (=amb-crawl [1 [2 3]])
                node2 (=amb-crawl [[4 5] 6])]
               (=return [node1 node2])))
 
-(=defn multi-crawl-2 [_]
-       (=bind [node1 (=amb-crawl [1 2 3])
-               node2 (=amb-crawl [4 5 6])]
+(=defn multi-crawl-iterate [_]
+       (=bind [node1 (=iterate-crawl [1 [2 3]])
+               node2 (=iterate-crawl [[4 5] 6])]
+              (=return [node1 node2])))
+
+(=defn multi-crawl-fast [_]
+       (=bind [node1 (=fast-iterate-crawl [1 [2 3]])
+               node2 (=fast-iterate-crawl [[4 5] 6])]
               (=return [node1 node2])))
 
 (deftest test-more-dft-continuations
-  (test-amb [[1 4] [1 5] [1 6]
-             [2 4] [2 5] [2 6]
-             [3 4] [3 5] [3 6]]
-            (=multi-crawl-1 nil))
-  (test-amb [[1 4] [1 5] [1 6]
-             [2 4] [2 5] [2 6]
-             [3 4] [3 5] [3 6]]
-            (=multi-crawl-2 nil)))
+  (test-amb multi-result (=multi-crawl nil))
+  (test-amb multi-result (=multi-crawl-iterate nil))
+  (test-amb multi-result (=multi-crawl-fast nil)))
 
-(=defn crawl-test [_]
-       (=bind [node1 (=ambv 1 2 3)
-               node2 (=ambv 4 5 6)]
-              (=return [node1 node2])))
-
-(deftest test-amb
-  (test-amb [[1 4] [1 5] [1 6]
-             [2 4] [2 5] [2 6]
-             [3 4] [3 5] [3 6]]
-    (=crawl-test nil))
-  #_(test-amb [[1 4] [1 5] [1 6]
-          [2 4] [2 5] [2 6]
-          [3 4] [3 5] [3 6]]
-    (=iterate-crawl-test nil))
+(deftest test-empty-amb
   (test-amb [] (=amb))
-  (test-amb [] (=ambv))
+  (test-amb [] (=amblift))
   (test-amb [] (=amb-iterate []))
   (test-amb [] (=>amb-iterate [])))

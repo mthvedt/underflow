@@ -7,49 +7,9 @@
 ; All snapshots are only run once. That's the rule.
 ; TODO snapshot cloning
 
-; TODO something is preventing optimizing the dispatches in this class.
-(deftype UnderflowIterator [^:unsynchronized-mutable ^Harness state
-                            ^:unsynchronized-mutable nextv]
-  Iterator
-  (hasNext [_]
-    (if (.getDict state) true false))
-  ; Needs to be called once by underflow-iterator, to set the first nextv
-  (next [self]
-    ; Make sure this nextv didn't come from the terminal snapshot
-    (if-let [^Continuation next-snap (.getDict state)]
-      ; Get the next nextv (we're always one step ahead)
-      (let [r (.execute state (.call next-snap state nil))
-            oldv nextv]
-        (set! state (.reharness state r))
-        (set! nextv (.extract state r))
-        oldv)
-      (throw (java.util.NoSuchElementException.))))
-  (remove [_]
-    (throw (UnsupportedOperationException.))))
-
 (defmacro snapshot [& body]
   `(reify Continuation
      (call [self# ~'*state* ~'_] ~@body)))
-
-(defn save-helper [saved-stack-sym saved-snap-sym exprs]
-  (if-let [expr (first exprs)]
-    `(snapshot
-       (let [~'*state* (-> ~'*state*
-                         (.setDict ~(save-helper
-                                      saved-stack-sym saved-snap-sym
-                                      (rest exprs)))
-                         (.setCont ~saved-stack-sym))]
-         ~expr))
-    (tag saved-snap-sym `Snapshot)))
-
-(defmacro =save-exprs! [etbody & exprs]
-  (let [saved-sym (gensym "stack-snap")
-        snap-sym (gensym "snap")]
-    `(let [~saved-sym (.getCont ~'*state*)
-           ~snap-sym (.getDict ~'*state*)
-           snap# ~(save-helper saved-sym snap-sym exprs)
-           ~'*state* (.setDict ~'*state* snap#)]
-       ~etbody)))
 
 (defmacro =retry
   []
@@ -67,14 +27,30 @@
        (=with-cont ~ss (=>return nil))
        (=>return nil))))
 
-; TODO nomenclature. don't use =amb/=ambv
+(defn amb-helper [saved-stack-sym saved-snap-sym exprs]
+  (if-let [expr (first exprs)]
+    `(snapshot
+       (let [~'*state* (-> ~'*state*
+                         (.setDict ~(amb-helper
+                                      saved-stack-sym saved-snap-sym
+                                      (rest exprs)))
+                         (.setCont ~saved-stack-sym))]
+         ~expr))
+    (tag saved-snap-sym `Snapshot)))
+
 (defmacro =amb
-  ([] `(=retry))
+  ([] `(=>retry))
   ([body] body)
   ([body & bodies]
-   `(=save-exprs! ~body ~@bodies)))
+   (let [saved-sym (gensym "stack-snap")
+         snap-sym (gensym "snap")]
+     `(let [~saved-sym (.getCont ~'*state*)
+            ~snap-sym (.getDict ~'*state*)
+            snap# ~(amb-helper saved-sym snap-sym bodies)
+            ~'*state* (.setDict ~'*state* snap#)]
+        ~body))))
 
-(defmacro =ambv
+(defmacro =amblift
   [& bodies]
   `(=amb ~@(map (fn [x] `(=return ~x)) bodies)))
 
@@ -92,20 +68,18 @@
           (let [*state* (.setDict old-state old-snap)]
             (=retry)))))))
 
-(defn push-iterator-snapshot
-  [^Iterator iterator ^Harness old-state]
-  (let [old-cont (.getCont old-state)
-        old-snap (.getDict old-state)]
-    (snapshot 
-      (let [*state* (.setCont *state* old-cont)]
-        (if (.hasNext iterator)
-          (=>return (.next iterator))
-          ; when iterator is exhausted, remove us from the stack
-          ; and restore the previous snapshot
-          (let [*state* (.setDict old-state old-snap)]
-            (=>retry)))))))
+(defmacro =amb-iterate
+  [iterable]
+  (let [ibs (tag (gensym "iterable") `Iterable)]
+    `(let [~ibs ~iterable
+           i# (.iterator ~ibs)]
+       (if (.hasNext i#)
+         (let [newsnap# (iterator-snapshot i# ~'*state*)
+               ~'*state* (.setDict ~'*state* newsnap#)]
+           (=return (.next i#)))
+         (=retry)))))
 
-(defmacro =amb-iterate-experiment
+(defmacro =>amb-iterate
   [iterable-form]
   (let [isym (tag (gensym "iterable") `Iterable)]
     `(let [~isym ~iterable-form
@@ -125,28 +99,6 @@
            (=>return (.next iterator#)))
          (=>retry)))))
 
-(defmacro =amb-iterate
-  [iterable]
-  (let [ibs (tag (gensym "iterable") `Iterable)]
-    `(let [~ibs ~iterable
-           i# (.iterator ~ibs)]
-       (if (.hasNext i#)
-         (let [newsnap# (iterator-snapshot i# ~'*state*)
-               ~'*state* (.setDict ~'*state* newsnap#)]
-           (=return (.next i#)))
-         (=retry)))))
-
-(defmacro =>amb-iterate
-  [iterable]
-  (let [ibs (tag (gensym "iterable") `Iterable)]
-    `(let [~ibs ~iterable
-           i# (.iterator ~ibs)]
-       (if (.hasNext i#)
-         (let [newsnap# (push-iterator-snapshot i# ~'*state*)
-               ~'*state* (.setDict ~'*state* newsnap#)]
-           (=>return (.next i#)))
-         (=>retry)))))
-
 ; Used to gracefully terminate at the end of a computation by returning nil.
 (deftype TerminalSnapshot []
   Continuation
@@ -157,19 +109,53 @@
       (=return nil))))
 (def terminal-snapshot (TerminalSnapshot.))
 
-(defn do-underflow-iterator [^Harness state ^Continuation snap]
+; TODO something is preventing optimizing the dispatches in this class.
+(deftype AmbIterator [^:unsynchronized-mutable ^Harness state
+                      ^:unsynchronized-mutable nextv]
+  Iterator
+  (hasNext [_]
+    (if (.getDict state) true false))
+  ; Needs to be called once to set the first nextv
+  (next [self]
+    ; Make sure this nextv didn't come from the terminal snapshot
+    (if-let [^Continuation next-snap (.getDict state)]
+      ; Get the next nextv (we're always one step ahead)
+      (let [r (.execute state (.call next-snap state nil))
+            oldv nextv]
+        (set! state (.reharness state r))
+        (set! nextv (.extract state r))
+        oldv)
+      (throw (java.util.NoSuchElementException.))))
+  (remove [_]
+    (throw (UnsupportedOperationException.))))
+
+(defn do-amb-iterator [^Harness state ^Continuation snap]
   (let [state (.setDict state snap)
-        iterator (UnderflowIterator. state nil)]
+        iterator (AmbIterator. state nil)]
     ; Must get next and throw away the first value
     (.next iterator)
     iterator))
 
-(defmacro underflow-iterator [state & body]
+(defmacro amb-iterator [state & body]
   `(let [sfn# (snapshot
                 (let [~'*state* (.setDict ~'*state* terminal-snapshot)]
                   ~@body))]
-     (do-underflow-iterator ~state sfn#)))
+     (do-amb-iterator ~state sfn#)))
 
-(defmacro underflow-seq [state & body]
-  ; TODO check thread safety of this
-  `(iterator-seq (underflow-iterator ~state ~@body)))
+(defn do-amb-seq [^Harness state ^Continuation snap]
+  ((fn stepf [state]
+     (lazy-seq
+       (let [r (.execute state (.call (.getDict state) state nil))
+             state (.reharness state r)]
+         (if-let [^Continuation next-snap (.getDict state)]
+           ; Make sure this didn't come from the terminal snapshot
+           (cons
+             (.extract state r)
+             (stepf state))))))
+     (.setDict state snap)))
+
+(defmacro amb-seq [state & body]
+  `(let [sfn# (snapshot
+                (let [~'*state* (.setDict ~'*state* terminal-snapshot)]
+                  ~@body))]
+     (do-amb-seq ~state sfn#)))
